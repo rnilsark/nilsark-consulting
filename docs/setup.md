@@ -12,7 +12,7 @@ This plugin system runs in **WSL2 on Windows** (or natively on Mac) using the Cl
 npm install -g @anthropic-ai/claude-code
 ```
 
-Verify: `cc --version`
+Verify: `claude --version`
 
 ### gws CLI (Google Workspace)
 
@@ -110,12 +110,12 @@ mkdir -p /mnt/c/Users/YourWindowsName/Desktop/nilsark-staging
 
 ```bash
 # Windows (WSL2)
-cc \
+claude \
   --plugin-dir /mnt/c/dev/nilsark-consulting/swedish-invoice-tools \
   --plugin-dir /mnt/c/dev/nilsark-consulting/nilsark
 
 # Mac
-cc \
+claude \
   --plugin-dir ~/dev/nilsark-consulting/swedish-invoice-tools \
   --plugin-dir ~/dev/nilsark-consulting/nilsark
 ```
