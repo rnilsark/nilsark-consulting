@@ -14,17 +14,19 @@ npm install -g @anthropic-ai/claude-code
 
 Verify: `cc --version`
 
-### gws CLI (Google Workspace plugin)
+### gws CLI (Google Workspace)
+
+The `gws` CLI is a separate npm package. Install it first:
+
+```bash
+npm install -g @googleworkspace/cli
+```
+
+Then install the Claude Code skills plugin (teaches Claude how to use it):
 
 ```bash
 claude plugin marketplace add https://github.com/WadeWarren/gws-claude-plugin
 claude plugin install gws
-```
-
-The `gws` binary lands in `~/.claude/plugins/cache/gws-marketplace/`. Add it to your PATH:
-
-```bash
-echo 'export PATH="$HOME/.claude/plugins/cache/gws-marketplace:$PATH"' >> ~/.bashrc && source ~/.bashrc
 ```
 
 Verify: `gws --version`

@@ -28,7 +28,7 @@ All state lives in Google Drive (`state.md` per month). Local staging is tempora
 ## Prerequisites
 
 - **Claude Code CLI** (`cc`) — `npm install -g @anthropic-ai/claude-code`
-- **gws CLI** — `claude plugin marketplace add https://github.com/WadeWarren/gws-claude-plugin && claude plugin install gws`
+- **gws CLI** — `npm install -g @googleworkspace/cli` then `claude plugin marketplace add https://github.com/WadeWarren/gws-claude-plugin && claude plugin install gws`
 - **git**
 - WSL2 (Windows) or macOS
 
