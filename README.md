@@ -1,0 +1,173 @@
+# nilsark-consulting
+
+Claude Code plugins for automating monthly accounting workflows for NILSARK CONSULTING AB (Swedish freelance AB).
+
+## What This Does
+
+Each month you receive invoices and receipts via Gmail. This system:
+
+1. **Fetches** email attachments from Gmail to a local staging folder
+2. **Classifies** each PDF as a leverantörsfaktura or kvitto, extracts accounting fields, and files it to the correct Google Drive subfolder
+3. **Tracks** unpaid leverantörsfakturor and flags overdue items
+4. **Matches** your bank statement CSV against invoices to update payment status
+5. **Closes** the month by routing all documents to Fortnox via email
+
+All state lives in Google Drive (`state.md` per month). Local staging is temporary only.
+
+---
+
+## Plugins
+
+| Plugin | Type | Purpose |
+|--------|------|---------|
+| `swedish-invoice-tools` | General | Skills for classifying Swedish invoices, extracting fields, matching bank transactions |
+| `nilsark` | Specific | Commands that orchestrate the full NILSARK workflow |
+
+---
+
+## Prerequisites
+
+- **Claude Code CLI** (`cc`) — `npm install -g @anthropic-ai/claude-code`
+- **gws CLI** — `claude plugin marketplace add https://github.com/WadeWarren/gws-claude-plugin && claude plugin install gws`
+- **git**
+- WSL2 (Windows) or macOS
+
+---
+
+## First-Time Setup
+
+### 1. Clone this repo
+
+```bash
+git clone <repo-url> /mnt/c/dev/nilsark-consulting
+# Mac:
+git clone <repo-url> ~/dev/nilsark-consulting
+```
+
+### 2. Authenticate gws
+
+```bash
+gws auth login
+```
+
+This opens a browser for Google OAuth. Credentials are stored in `~/.gws/`. You must re-run this on each new machine.
+
+### 3. Authenticate gws
+
+```bash
+gws auth login
+```
+
+### 4. Create your config file
+
+```bash
+cp /mnt/c/dev/nilsark-consulting/config.template.md ~/.nilsark-config.md
+```
+
+Edit `~/.nilsark-config.md` and fill in:
+- `STAGING_DIR` — local path for temporary PDFs
+- `DRIVE_ROOT_FOLDER_ID` — Google Drive folder ID (see instructions in the template)
+- Fortnox email addresses
+- Your email
+
+### 5. Create your local staging folder
+
+```bash
+mkdir -p /mnt/c/Users/YourName/Desktop/nilsark-staging
+```
+
+### 6. Load the plugins
+
+```bash
+cc \
+  --plugin-dir /mnt/c/dev/nilsark-consulting/swedish-invoice-tools \
+  --plugin-dir /mnt/c/dev/nilsark-consulting/nilsark
+```
+
+Mac: replace `/mnt/c/dev/` with `~/dev/`. Type `/help` to confirm both plugins appear.
+
+---
+
+## Monthly Workflow
+
+Run these commands in order. Steps 1–2 are idempotent — safe to run multiple times as new invoices arrive during the month.
+
+### Step 1 — Fetch attachments
+
+```
+/fetch-attachments 2026-03
+```
+
+Downloads new Gmail attachments for the month to your staging folder. Skips already-processed messages.
+
+### Step 2 — Classify documents
+
+```
+/classify 2026-03
+```
+
+Reads each PDF from staging, classifies it, extracts accounting fields, uploads to the correct Drive subfolder, and updates `state.md`.
+
+Drive structure:
+```
+2026-03/
+├── state.md
+├── Kontohändelser.pdf
+├── invoice - <number>
+└── Verifikationer/
+    ├── kvitto-xxx.pdf              ← kvitton here
+    └── Leverantörsfakturor/
+        └── faktura-xxx.pdf         ← leverantörsfakturor here
+```
+
+### Step 3 — Check payments (run anytime)
+
+```
+/payments-due 2026-03
+```
+
+Shows all unpaid leverantörsfakturor with due dates and amounts. Flags overdue items.
+
+### Step 4 — Match bank statement
+
+Export your bank statement as CSV from SEB/Handelsbanken and drop it in your staging folder:
+
+```
+$STAGING_DIR/2026-03/kontohändelser-2026-03.csv
+```
+
+Then run:
+
+```
+/match-bank 2026-03
+```
+
+Matches transactions against invoices, updates payment status in `state.md`.
+
+### Step 5 — Close the month
+
+Preview first:
+```
+/month-close 2026-03 --dry-run
+```
+
+Then execute:
+```
+/month-close 2026-03
+```
+
+Routes all documents to Fortnox via email and marks the month as closed.
+
+---
+
+## State File
+
+Each month has a `state.md` in Google Drive that tracks every document and its status. See [docs/state-schema.md](docs/state-schema.md) for the full schema.
+
+## Fortnox Routing
+
+See [docs/fortnox-routing.md](docs/fortnox-routing.md) for routing rules and known limitations.
+
+## New Machine Setup
+
+See [docs/setup.md](docs/setup.md) for detailed per-OS setup instructions.

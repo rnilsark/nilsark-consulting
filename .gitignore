@@ -1,0 +1,17 @@
+# Machine-specific config — copy config.template.md to ~/.nilsark-config.md
+# Do NOT commit your personal config
+~/.nilsark-config.md
+
+# Local staging contents (PDFs, CSVs are temporary)
+staging/
+*/staging/
+
+# Downloaded state files (always fetch fresh from Drive)
+.state/
+*/.state/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
