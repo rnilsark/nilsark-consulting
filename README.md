@@ -76,15 +76,20 @@ Edit `~/.nilsark-config.md` and fill in:
 mkdir -p /mnt/c/Users/YourName/Desktop/nilsark-staging
 ```
 
-### 6. Load the plugins
+### 6. Register plugins permanently
 
-```bash
-claude \
-  --plugin-dir /mnt/c/dev/nilsark-consulting/swedish-invoice-tools \
-  --plugin-dir /mnt/c/dev/nilsark-consulting/nilsark
+Add to `~/.claude/settings.json`:
+
+```json
+{
+  "plugins": [
+    "/mnt/c/dev/nilsark-consulting/swedish-invoice-tools",
+    "/mnt/c/dev/nilsark-consulting/nilsark"
+  ]
+}
 ```
 
-Mac: replace `/mnt/c/dev/` with `~/dev/`. Type `/help` to confirm both plugins appear.
+After this, just run `claude` — no flags needed. Type `/help` to confirm both plugins appear.
 
 ---
 

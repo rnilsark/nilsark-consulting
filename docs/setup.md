@@ -106,21 +106,33 @@ mkdir -p /mnt/c/Users/YourWindowsName/Desktop/nilsark-staging
 
 ---
 
-## 5. Load the Plugins
+## 5. Register Plugins Permanently
 
-```bash
-# Windows (WSL2)
-claude \
-  --plugin-dir /mnt/c/dev/nilsark-consulting/swedish-invoice-tools \
-  --plugin-dir /mnt/c/dev/nilsark-consulting/nilsark
+Add the plugins to `~/.claude/settings.json` so they load automatically every time you run `claude`:
 
-# Mac
-claude \
-  --plugin-dir ~/dev/nilsark-consulting/swedish-invoice-tools \
-  --plugin-dir ~/dev/nilsark-consulting/nilsark
+**Windows (WSL2):**
+```json
+{
+  "plugins": [
+    "/mnt/c/dev/nilsark-consulting/swedish-invoice-tools",
+    "/mnt/c/dev/nilsark-consulting/nilsark"
+  ]
+}
 ```
 
-Type `/help` to verify both plugins appear.
+**Mac:**
+```json
+{
+  "plugins": [
+    "/Users/YourName/dev/nilsark-consulting/swedish-invoice-tools",
+    "/Users/YourName/dev/nilsark-consulting/nilsark"
+  ]
+}
+```
+
+If `settings.json` already has content, merge the `plugins` array in rather than overwriting.
+
+After saving, just run `claude` — no flags needed. Type `/help` to verify both plugins appear.
 
 ---
 
