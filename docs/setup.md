@@ -21,6 +21,12 @@ claude plugin marketplace add https://github.com/WadeWarren/gws-claude-plugin
 claude plugin install gws
 ```
 
+The `gws` binary lands in `~/.claude/plugins/cache/gws-marketplace/`. Add it to your PATH:
+
+```bash
+echo 'export PATH="$HOME/.claude/plugins/cache/gws-marketplace:$PATH"' >> ~/.bashrc && source ~/.bashrc
+```
+
 Verify: `gws --version`
 
 ### git
