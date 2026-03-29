@@ -21,14 +21,24 @@ Use argument if provided, otherwise `date +%Y-%m`.
 
 ## Step 3 — Find the Bank Statement CSV
 
-Look for CSV files in `$STAGING_DIR/$MONTH/`:
+First check local staging:
 ```bash
 ls "$STAGING_DIR/$MONTH/"*.csv 2>/dev/null
 ```
 
-- If exactly one CSV is found: use it.
+If no CSV found locally, check the `.nilsark/` folder in Drive (same folder as state.md — resolve `<NILSARK_FOLDER_ID>` from Step 4 first if needed):
+```bash
+gws drive files list --params '{"q": "'\''<NILSARK_FOLDER_ID>'\'' in parents and trashed=false and name contains '\''.csv'\''"}' --format json
+```
+
+If a CSV is found in Drive: download it to `$STAGING_DIR/$MONTH/` and proceed:
+```bash
+gws drive files get --params '{"fileId": "<CSV_FILE_ID>", "alt": "media"}' -o "$STAGING_DIR/$MONTH/<filename>"
+```
+
+- If exactly one CSV is found (locally or in Drive): use it.
 - If multiple CSVs are found: list them and ask the user which one to use before continuing.
-- If no CSV is found: stop and tell the user to export their bank statement CSV and drop it in `$STAGING_DIR/$MONTH/`.
+- If no CSV is found anywhere: stop and tell the user to export their bank statement CSV and upload it to `YYYY-MM/.nilsark/` in Google Drive, then re-run.
 
 ## Step 4 — Download state.md
 
@@ -76,6 +86,9 @@ Matched (fuzzy — review recommended):
 Unmatched bank transactions (outgoing, no invoice found):
   - 2026-03-05 | Skatteverket | -8 500,00 SEK
   - 2026-03-25 | ICA Maxi | -1 200,00 SEK
+
+→ If any of these are paper receipts, email them to yourself so they
+  appear in the next /fetch-attachments run.
 
 Still unpaid invoices:
   - Fortnox AB — 450,00 SEK — due 2026-04-10

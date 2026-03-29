@@ -1,23 +1,24 @@
 ---
-description: "Close the accounting month — route all documents to Fortnox via email and mark state.md as closed. Use --dry-run to preview without sending. Usage: /month-close [YYYY-MM] [--dry-run]"
+description: "Close the accounting month — create Gmail drafts for all Fortnox routing emails and mark state.md as closed. Use --dry-run to preview without creating drafts. Usage: /month-close [YYYY-MM] [--dry-run]"
 argument-hint: YYYY-MM [--dry-run]
 allowed-tools: ["Read", "Bash"]
 ---
 
 # Month Close — Route Documents to Fortnox
 
-You are closing the accounting month for NILSARK CONSULTING AB by routing all documents to Fortnox.
+You are closing the accounting month for NILSARK CONSULTING AB by creating Gmail drafts for all Fortnox routing emails. The user reviews and sends the drafts manually.
 
-**Always run with `--dry-run` first to review what will be sent.**
+**Always run with `--dry-run` first to review what drafts will be created.**
 
 ## Step 1 — Read Config
 
 ```bash
 STAGING_DIR=$(grep '^STAGING_DIR=' ~/.nilsark-config.md | cut -d= -f2-)
 DRIVE_ROOT_FOLDER_ID=$(grep '^DRIVE_ROOT_FOLDER_ID=' ~/.nilsark-config.md | cut -d= -f2-)
+FORTNOX_VERIFIKATION=$(grep '^FORTNOX_EMAIL_VERIFIKATION=' ~/.nilsark-config.md | cut -d= -f2-)
 FORTNOX_LEVERANTORSFAKTURA=$(grep '^FORTNOX_EMAIL_LEVERANTORSFAKTURA=' ~/.nilsark-config.md | cut -d= -f2-)
-FORTNOX_KVITTO=$(grep '^FORTNOX_EMAIL_KVITTO=' ~/.nilsark-config.md | cut -d= -f2-)
-FORTNOX_BANK_INVOICE=$(grep '^FORTNOX_EMAIL_BANK_INVOICE=' ~/.nilsark-config.md | cut -d= -f2-)
+FORTNOX_SKATTEKONTO=$(grep '^FORTNOX_EMAIL_SKATTEKONTO=' ~/.nilsark-config.md | cut -d= -f2-)
+FORTNOX_KUNDFAKTURA=$(grep '^FORTNOX_EMAIL_KUNDFAKTURA=' ~/.nilsark-config.md | cut -d= -f2-)
 MY_EMAIL=$(grep '^MY_EMAIL=' ~/.nilsark-config.md | cut -d= -f2-)
 DRY_RUN=false
 ```
@@ -43,25 +44,23 @@ If yes and NOT in dry-run mode: stop and tell the user:
 
 ## Step 5 — Build Routing Plan
 
-Collect documents to route from the Documents table:
+Process each Drive subfolder in order. For each folder, if the corresponding config email is empty → skip it entirely and log `skipped — FORTNOX_EMAIL_X not configured`.
 
-**Leverantörsfakturor** (fortnox_sent = no, type = leverantorsfaktura):
-- Route to: `$FORTNOX_LEVERANTORSFAKTURA`
-- Method: forward original Gmail message if `message_id` is available in state.md
-- Fallback (no message_id — locally scanned): send new email with Drive link
+**Verifikationer/** → `$FORTNOX_VERIFIKATION`
+- From state.md: all rows where `type = kvitto` and `fortnox_sent = no`
+- Method: forward original Gmail message if `message_id` is available; else download from Drive and send as attachment
 
-**Kvitton** (fortnox_sent = no, type = kvitto):
-- Route to: `$FORTNOX_KVITTO`
-- Method: forward original Gmail message if available
-- Fallback: send new email with Drive link
+**Leverantörsfakturor/** → `$FORTNOX_LEVERANTORSFAKTURA`
+- From state.md: all rows where `type = leverantörsfaktura` and `fortnox_sent = no`
+- Method: forward original Gmail message if `message_id` is available; else download from Drive and send as attachment
 
-**Bank statement** (`Kontohändelser.pdf` in `$STAGING_DIR/$MONTH/` or Drive root of month):
-- Route to: `$FORTNOX_BANK_INVOICE`
-- Method: send new email with the PDF as a forward or Drive link
+**Skattekonto/** → `$FORTNOX_SKATTEKONTO`
+- From state.md: all rows where `type = skattekonto` and `fortnox_sent = no`
+- Method: download file from Drive and send as attachment
 
-**Outgoing invoice** (your invoice to your client — files matching `invoice*` in Drive month root):
-- Route to: `$FORTNOX_BANK_INVOICE`
-- Method: forward original Gmail message if available, otherwise Drive link
+**Kundfakturor/** → `$FORTNOX_KUNDFAKTURA`
+- List all files in `YYYY-MM/Kundfakturor/` in Drive directly (not tracked in state.md)
+- Method: download each file from Drive and send as attachment
 
 ## Step 6 — Dry Run Output
 
@@ -69,51 +68,61 @@ If `DRY_RUN=true`, print the full routing plan and stop:
 
 ```
 DRY RUN — Month Close 2026-03
-No emails will be sent.
+No drafts will be created.
 
 Would send:
+  → FORTNOX_VERIFIKATION
+    [forward] Supplier A — receipt-a.pdf (msg_id: abc123)
+    [forward] Supplier B — receipt-b.pdf (msg_id: def456)
+
   → FORTNOX_LEVERANTORSFAKTURA
-    [forward] Telia Sverige AB — faktura-telia-2026-03.pdf (msg_id: 18f1a2b3c4d)
-    [forward] AWS EMEA SARL — invoice-aws-2026-03.pdf (msg_id: 18e2b3c4d5e)
-    [drive-link] Lokal skanning — kvitto-scanned.pdf (no Gmail msg_id — will send Drive link)
+    [forward] Supplier C — invoice-c.pdf (msg_id: ghi789)
+    [attachment] Supplier D — invoice-d.pdf (no Gmail msg_id — downloaded from Drive)
 
-  → FORTNOX_KVITTO
-    [forward] ICA Kvitto 2026-03-15 (msg_id: 18d3c4d5e6f)
+  → FORTNOX_SKATTEKONTO  skipped — FORTNOX_EMAIL_SKATTEKONTO not configured
 
-  → FORTNOX_BANK_INVOICE
-    [upload] Kontohändelser.pdf
-    [forward] Invoice 2026-03 to Client AB (msg_id: 18c4d5e6f70)
+  → FORTNOX_KUNDFAKTURA
+    [attachment] client-invoice-2026-03.pdf (downloaded from Drive)
 
-Nothing will be sent. Re-run without --dry-run to execute.
+No drafts will be created. Re-run without --dry-run to create them.
 ```
 
 ## Step 7 — Execute (non-dry-run only)
 
 For each document in the routing plan:
 
-**Forward method** (original Gmail message available):
+**Forward method** (original Gmail message_id available):
+
+Create a draft that forwards the original message:
 ```bash
-gws gmail +forward --message-id <message_id> --to <fortnox_email>
+gws gmail +draft-forward --message-id <message_id> --to <fortnox_email>
 ```
 
-**Drive link fallback** (no Gmail message_id):
-Find the file in Drive and get its shareable link, then:
+**Attachment method** (no Gmail message_id — Skattekonto, Kundfakturor, or locally scanned docs):
+
+Download the file from Drive to local staging first:
 ```bash
-gws gmail +send \
+gws drive files get --params '{"fileId": "<file_id>", "alt": "media"}' -o "$STAGING_DIR/$MONTH/<filename>"
+```
+
+Then create a draft with the file attached:
+```bash
+gws gmail +draft \
   --to <fortnox_email> \
-  --subject "<Type>: <supplier> <amount> SEK — <date>" \
-  --body "Se bifogad fil i Google Drive: https://drive.google.com/file/d/<file_id>/view\n\nFil: <filename>\nLeverantör: <supplier>\nBelopp: <amount> SEK"
+  --subject "<type>: <supplier> <amount> <currency> — <YYYY-MM>" \
+  --body "Bifogad fil: <filename>" \
+  --attachment "$STAGING_DIR/$MONTH/<filename>"
 ```
 
-After each successful send:
+After each draft is successfully created:
 - Update `fortnox_sent = yes` for that document in the Documents table
-- Add it to the send log
+- Add it to the draft log
 
-If a send fails: log the failure, continue with the next document. Do not mark as sent.
+If a draft creation fails: log the failure, continue with the next document. Do not mark as sent.
 
 ## Step 8 — Update Month Summary
 
-If all sends succeeded (or at least all were attempted):
+If all drafts were created (or at least all were attempted):
 ```
 Month-close sent: yes
 Month-close date: YYYY-MM-DD
@@ -128,17 +137,16 @@ Upload the final state.md back to Drive (see `nilsark:accounting-state` skill fo
 ```
 Month Close Complete — 2026-03
 
-Sent to Fortnox:
-  ✓ Leverantörsfakturor: 2 documents
-  ✓ Kvitton: 1 document
-  ✓ Bank statement + outgoing invoice
-
-Fallback (Drive link, no attachment):
-  ! kvitto-scanned.pdf — sent as Drive link to FORTNOX_KVITTO
+Drafts created:
+  ✓ Verifikationer: 2 drafts  → FORTNOX_VERIFIKATION
+  ✓ Leverantörsfakturor: 2 drafts  → FORTNOX_LEVERANTORSFAKTURA
+  - Skattekonto: skipped — FORTNOX_EMAIL_SKATTEKONTO not configured
+  ✓ Kundfakturor: 1 draft  → FORTNOX_KUNDFAKTURA
 
 Failures:
   None
 
+Drafts are ready in Gmail — review and send manually.
 state.md updated. Month 2026-03 is closed.
 ```
 

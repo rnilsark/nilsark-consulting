@@ -30,14 +30,20 @@ DRIVE_ROOT_FOLDER_ID=your-drive-folder-id-here
 
 ## Fortnox Email Routing
 
-# Email address for leverantörsfakturor (supplier invoices)
+# Each Drive subfolder maps 1:1 to a Fortnox routing email.
+# Leave a value empty to skip that folder during month-close.
+
+# Verifikationer/ — receipts and auto-charged subscriptions
+FORTNOX_EMAIL_VERIFIKATION=your-fortnox-verifikation-email@fortnox.se
+
+# Leverantörsfakturor/ — supplier invoices
 FORTNOX_EMAIL_LEVERANTORSFAKTURA=your-fortnox-leverantorsfaktura-email@fortnox.se
 
-# Email address for kvitton (receipts)
-FORTNOX_EMAIL_KVITTO=your-fortnox-kvitto-email@fortnox.se
+# Skattekonto/ — Skatteverket tax account documents
+FORTNOX_EMAIL_SKATTEKONTO=
 
-# Email address for bank statement + your outgoing invoice
-FORTNOX_EMAIL_BANK_INVOICE=your-fortnox-bank-invoice-email@fortnox.se
+# Kundfakturor/ — your outgoing invoices to clients
+FORTNOX_EMAIL_KUNDFAKTURA=your-fortnox-kundfaktura-email@fortnox.se
 
 ---
 
