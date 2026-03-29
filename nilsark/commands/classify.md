@@ -46,7 +46,7 @@ For each unclassified file:
 
 Look up this file's message_id in the Processed Gmail Messages table. If that same message_id produced multiple attachment files, and one of those other files is already recorded in the Documents table as `kvitto`, then this file is likely the companion invoice for an already-filed receipt. Skip it and record it in state as `skipped — covered by companion receipt`. Do not upload to Drive.
 
-**c) Classify** using the `classify-invoice` skill.
+**c) Classify** by reading `swedish-invoice-tools/skills/classify-invoice.md` and applying its decision tree to the document. Do not classify from your own reasoning — follow the skill's rules explicitly.
 
 **d) Extract fields** using the `extract-invoice-fields` skill.
 
