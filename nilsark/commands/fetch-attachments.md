@@ -59,32 +59,7 @@ If the month folder does not exist yet, create it:
 gws drive files create --json '{"name": "'"$MONTH"'", "mimeType": "application/vnd.google-apps.folder", "parents": ["'"$DRIVE_ROOT_FOLDER_ID"'"]}'
 ```
 
-If state.md does not exist yet, create it from this template (replace YYYY-MM with the actual month):
-```markdown
-# State: YYYY-MM
-
-## Processed Gmail Messages
-| message_id | date | from | subject | attachment_filename | status |
-|------------|------|------|---------|-------------------|--------|
-
-## Documents
-| file | type | supplier | amount | currency | due_date | ocr_number | bank_account | vat_amount | drive_path | payment_status | fortnox_sent |
-|------|------|---------|--------|----------|---------|-----------|-------------|-----------|-----------|---------------|-------------|
-
-## Bank Statement Transactions
-| date | description | amount | currency | matched_to_file | match_confidence |
-|------|-------------|--------|----------|----------------|-----------------|
-
-## Month Summary
-- Documents processed: 0
-- Leverantörsfakturor: 0
-- Kvitton: 0
-- Skattekonto: 0
-- Total VAT: 0 SEK
-- Unpaid invoices: 0
-- Month-close sent: no
-- Month-close date:
-```
+If state.md does not exist yet, create it from the template defined in the `accounting-state` skill (see First Run section).
 
 ## Step 5 — Parse Existing Message IDs
 

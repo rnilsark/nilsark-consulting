@@ -73,7 +73,7 @@ This file is the single source of truth for all processing status. Every command
 | `ocr_number` | string | OCR-nummer for bank payment — leverantörsfaktura only |
 | `bank_account` | string | Bankgiro (XXXXXX-X) or plusgiro (XXXXX-X) |
 | `vat_amount` | decimal | Moms in SEK |
-| `drive_path` | string | Full path in Drive (e.g. `2026-03/Verifikationer/Leverantörsfakturor/faktura.pdf`) |
+| `drive_path` | string | Full path in Drive (e.g. `2026-03/Leverantörsfakturor/faktura.pdf`) |
 | `payment_status` | enum | Payment status |
 | `fortnox_sent` | enum | Whether routed to Fortnox |
 

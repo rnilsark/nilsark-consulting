@@ -113,10 +113,12 @@ Drive structure:
 ├── state.md
 ├── Kontohändelser.pdf
 ├── invoice - <number>
-└── Verifikationer/
-    ├── kvitto-xxx.pdf              ← kvitton here
-    └── Leverantörsfakturor/
-        └── faktura-xxx.pdf         ← leverantörsfakturor here
+├── Verifikationer/
+│   └── kvitto-xxx.pdf              ← kvitton + unknown here
+├── Leverantörsfakturor/
+│   └── faktura-xxx.pdf             ← leverantörsfakturor here
+└── Skattekonto/
+    └── skattekonto-xxx.pdf         ← skattekonto here
 ```
 
 ### Step 3 — Check payments (run anytime)

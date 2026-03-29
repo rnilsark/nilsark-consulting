@@ -44,33 +44,27 @@ For each unclassified file:
 
 Look up this file's message_id in the Processed Gmail Messages table. If that same message_id produced multiple attachment files, and one of those other files is already recorded in the Documents table as `kvitto`, then this file is likely the companion invoice for an already-filed receipt. Skip it and record it in state as `skipped — covered by companion receipt`. Do not upload to Drive.
 
-**c) Classify** using the `classify-invoice` skill rules:
-- `skattekonto` — from Skatteverket, shows skattekonto balance with tax line items
-- `kvitto` — auto-charged to card, or shows completed payment with no manual payment step
-- `leverantorsfaktura` — has Förfallodatum and requires manual payment
-- `unknown` — ambiguous or unreadable
+**c) Classify** using the `classify-invoice` skill.
 
-**d) Extract fields** using the `extract-invoice-fields` skill:
-- All documents: `supplier`, `amount`, `currency`, `vat_amount`
-- Leverantörsfaktura and skattekonto: `due_date`, `ocr_number`, `bank_account`
+**d) Extract fields** using the `extract-invoice-fields` skill.
 
 **e) Determine Drive target folder:**
 
 - **kvitto** → `YYYY-MM/Verifikationer/`
-- **leverantörsfaktura** → `YYYY-MM/Verifikationer/Leverantörsfakturor/`
+- **leverantörsfaktura** → `YYYY-MM/Leverantörsfakturor/`
 - **skattekonto** → `YYYY-MM/Skattekonto/`
 - **unknown** → `YYYY-MM/Verifikationer/`
 
 Find/create subfolders as needed:
 ```bash
-# Find Verifikationer folder
+# Find Verifikationer folder (for kvitto + unknown)
 gws drive files list --params '{"q": "name='\''Verifikationer'\'' and '\''<MONTH_FOLDER_ID>'\'' in parents and mimeType='\''application/vnd.google-apps.folder'\'' and trashed=false"}' --format json
 
 # If not found, create it
 gws drive files create --json '{"name": "Verifikationer", "mimeType": "application/vnd.google-apps.folder", "parents": ["<MONTH_FOLDER_ID>"]}'
 
-# Find/create Leverantörsfakturor inside Verifikationer
-gws drive files list --params '{"q": "name='\''Leverantörsfakturor'\'' and '\''<VERIFIKATIONER_FOLDER_ID>'\'' in parents and mimeType='\''application/vnd.google-apps.folder'\'' and trashed=false"}' --format json
+# Find/create Leverantörsfakturor directly under month folder
+gws drive files list --params '{"q": "name='\''Leverantörsfakturor'\'' and '\''<MONTH_FOLDER_ID>'\'' in parents and mimeType='\''application/vnd.google-apps.folder'\'' and trashed=false"}' --format json
 
 # Find/create Skattekonto directly under month folder
 gws drive files list --params '{"q": "name='\''Skattekonto'\'' and '\''<MONTH_FOLDER_ID>'\'' in parents and mimeType='\''application/vnd.google-apps.folder'\'' and trashed=false"}' --format json
@@ -83,7 +77,7 @@ gws drive +upload "$STAGING_DIR/$MONTH/<filename>" --parent <TARGET_FOLDER_ID>
 
 Record the Drive path as appropriate:
 - `YYYY-MM/Verifikationer/<filename>`
-- `YYYY-MM/Verifikationer/Leverantörsfakturor/<filename>`
+- `YYYY-MM/Leverantörsfakturor/<filename>`
 - `YYYY-MM/Skattekonto/<filename>`
 
 **g) Append row to Documents table** in state.md:

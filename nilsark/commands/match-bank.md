@@ -36,13 +36,7 @@ Download state.md from Drive using the standard pattern (see accounting-state sk
 
 ## Step 5 — Read and Parse the CSV
 
-Use the Read tool to read the CSV file. Check the first row to identify column names.
-
-**SEB format:** `Bokföringsdag`, `Valutadag`, `Belopp`, `Avsändare/mottagare`, `Transaktion`, `Saldo`
-
-**Handelsbanken format:** Columns may differ — adapt based on actual first row.
-
-If the format is unrecognized, show the actual first row and stop.
+Use the Read tool to read the CSV file. Apply the `match-bank-transactions` skill to identify the bank format and parse the columns.
 
 ## Step 6 — Build Invoice List
 
