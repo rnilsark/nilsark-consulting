@@ -23,7 +23,7 @@ Use argument if provided, otherwise `date +%Y-%m`.
 
 > **Auth guard:** If any `gws` command in this step exits with a non-zero code and its output contains "auth", "token", "unauthenticated", "unauthorized", or "login", stop immediately and run `/nilsark:gws-auth`. After the user completes auth, retry from this step.
 
-Follow the same download pattern as fetch-attachments (see accounting-state skill). Load the current state.md from `$STAGING_DIR/.state/$MONTH-state.md`.
+Follow the same download pattern as fetch-attachments (see `nilsark:accounting-state` skill). Load the current state.md from `$STAGING_DIR/.state/$MONTH-state.md`.
 
 ## Step 4 — Find Unclassified Files
 
@@ -111,7 +111,7 @@ Recount all rows and update the Month Summary section:
 
 ## Step 7 — Upload state.md
 
-Upload the updated state.md back to Drive.
+Upload the updated state.md back to Drive (see `nilsark:accounting-state` skill for the upload pattern).
 
 ## Step 8 — Print Summary
 

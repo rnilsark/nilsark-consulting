@@ -50,18 +50,25 @@ Find the month folder in Drive:
 gws drive files list --params '{"q": "name='\'''"$MONTH"'\'' and '\'''"$DRIVE_ROOT_FOLDER_ID"'\'' in parents and mimeType='\''application/vnd.google-apps.folder'\'' and trashed=false"}' --format json
 ```
 
-If the month folder exists, get its ID and download state.md:
-```bash
-gws drive files list --params '{"q": "name='\''state.md'\'' and '\''<MONTH_FOLDER_ID>'\'' in parents and trashed=false"}' --format json
-cd "$STAGING_DIR/.state" && gws drive files get --params '{"fileId": "<STATE_FILE_ID>", "alt": "media"}' -o "$MONTH-state.md"
-```
-
 If the month folder does not exist yet, create it:
 ```bash
 gws drive files create --json '{"name": "'"$MONTH"'", "mimeType": "application/vnd.google-apps.folder", "parents": ["'"$DRIVE_ROOT_FOLDER_ID"'"]}'
 ```
 
-If state.md does not exist yet, create it from the template defined in the `accounting-state` skill (see First Run section).
+Find or create the `.nilsark` subfolder within the month folder:
+```bash
+gws drive files list --params '{"q": "name='\''.nilsark'\'' and '\''<MONTH_FOLDER_ID>'\'' in parents and mimeType='\''application/vnd.google-apps.folder'\'' and trashed=false"}' --format json
+# If not found:
+gws drive files create --json '{"name": ".nilsark", "mimeType": "application/vnd.google-apps.folder", "parents": ["<MONTH_FOLDER_ID>"]}'
+```
+
+Find and download state.md from the `.nilsark` folder:
+```bash
+gws drive files list --params '{"q": "name='\''state.md'\'' and '\''<NILSARK_FOLDER_ID>'\'' in parents and trashed=false"}' --format json
+cd "$STAGING_DIR/.state" && gws drive files get --params '{"fileId": "<STATE_FILE_ID>", "alt": "media"}' -o "$MONTH-state.md"
+```
+
+If state.md does not exist yet, create it from the template defined in the `nilsark:accounting-state` skill (see First Run section).
 
 ## Step 5 — Parse Existing Message IDs
 
@@ -113,7 +120,7 @@ If any step (b, c) fails, append the row with status `error` and continue to the
 
 Upload the modified state.md back to Drive:
 ```bash
-gws drive +upload "$STAGING_DIR/.state/$MONTH-state.md" --parent <MONTH_FOLDER_ID> --name state.md
+gws drive +upload "$STAGING_DIR/.state/$MONTH-state.md" --parent <NILSARK_FOLDER_ID> --name state.md
 ```
 
 If a state.md already exists in Drive, this overwrites it.

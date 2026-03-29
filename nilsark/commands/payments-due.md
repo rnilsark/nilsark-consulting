@@ -23,7 +23,7 @@ Use argument if provided, otherwise `date +%Y-%m`.
 
 > **Auth guard:** If any `gws` command in this step exits with a non-zero code and its output contains "auth", "token", "unauthenticated", "unauthorized", or "login", stop immediately and run `/nilsark:gws-auth`. After the user completes auth, retry from this step.
 
-Download state.md from Drive following the standard pattern (see accounting-state skill).
+Download state.md from Drive following the standard pattern (see `nilsark:accounting-state` skill).
 
 ## Step 4 — Get Today's Date
 
@@ -43,7 +43,7 @@ For each selected row:
 
 ## Step 6 — Upload state.md (if any statuses changed)
 
-If any rows were updated to `overdue`, upload the updated state.md back to Drive.
+If any rows were updated to `overdue`, upload the updated state.md back to Drive (see `nilsark:accounting-state` skill for the upload pattern).
 
 ## Step 7 — Print Report
 

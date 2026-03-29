@@ -32,7 +32,7 @@ Use argument if provided (ignoring `--dry-run`), otherwise `date +%Y-%m`.
 
 > **Auth guard:** If any `gws` command in this step exits with a non-zero code and its output contains "auth", "token", "unauthenticated", "unauthorized", or "login", stop immediately and run `/nilsark:gws-auth`. After the user completes auth, retry from this step.
 
-Download state.md from Drive.
+Download state.md from Drive (see `nilsark:accounting-state` skill for the download pattern).
 
 ## Step 4 — Guard: Already Closed?
 
@@ -121,7 +121,7 @@ Month-close date: YYYY-MM-DD
 
 ## Step 9 — Upload state.md
 
-Upload the final state.md back to Drive.
+Upload the final state.md back to Drive (see `nilsark:accounting-state` skill for the upload pattern).
 
 ## Step 10 — Print Final Report
 

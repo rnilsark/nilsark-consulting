@@ -32,7 +32,7 @@ ls "$STAGING_DIR/$MONTH/"*.csv 2>/dev/null
 
 ## Step 4 — Download state.md
 
-Download state.md from Drive using the standard pattern (see accounting-state skill).
+Download state.md from Drive using the standard pattern (see `nilsark:accounting-state` skill).
 
 ## Step 5 — Read and Parse the CSV
 
@@ -60,7 +60,7 @@ Recount unpaid invoices and update the Month Summary.
 
 ## Step 9 — Upload state.md
 
-Upload the updated state.md back to Drive.
+Upload the updated state.md back to Drive (see `nilsark:accounting-state` skill for the upload pattern).
 
 ## Step 10 — Print Report
 
