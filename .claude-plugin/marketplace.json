@@ -1,0 +1,25 @@
+{
+  "name": "nilsark-consulting",
+  "owner": {
+    "name": "NILSARK CONSULTING AB"
+  },
+  "metadata": {
+    "description": "Finance and accounting plugins for NILSARK CONSULTING AB"
+  },
+  "plugins": [
+    {
+      "name": "swedish-invoice-tools",
+      "description": "Skills for classifying and processing Swedish AB accounting documents",
+      "source": "./swedish-invoice-tools",
+      "version": "1.0.0",
+      "license": "MIT"
+    },
+    {
+      "name": "nilsark",
+      "description": "Monthly accounting workflow commands for NILSARK CONSULTING AB",
+      "source": "./nilsark",
+      "version": "1.0.0",
+      "license": "MIT"
+    }
+  ]
+}
