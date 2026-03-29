@@ -1,8 +1,7 @@
 ---
-description: Fetch Gmail attachments for the current (or specified) month and save them to the local staging folder. Skips already-processed messages. Safe to run multiple times. Usage: /fetch-attachments [YYYY-MM]
+description: "Fetch Gmail attachments for the current (or specified) month and save them to the local staging folder. Skips already-processed messages. Safe to run multiple times. Usage: /fetch-attachments [YYYY-MM]"
 argument-hint: YYYY-MM (defaults to current month)
-allowed-tools:
-  - Bash
+allowed-tools: ["Bash"]
 ---
 
 # Fetch Gmail Attachments
@@ -91,7 +90,7 @@ Read the local state.md and extract all `message_id` values from the Processed G
 ## Step 6 — Search Gmail for Attachments
 
 ```bash
-gws gmail users messages list --params '{"userId": "me", "q": "has:attachment after:'"$FIRST_DAY"' before:'"$LAST_DAY"'", "maxResults": 100}' --format json
+gws gmail users messages list --params '{"userId": "me", "q": "has:attachment in:inbox after:'"$FIRST_DAY"' before:'"$LAST_DAY"'", "maxResults": 100}' --format json
 ```
 
 This returns a list of message IDs.
@@ -110,8 +109,15 @@ gws gmail users messages get --params '{"userId": "me", "id": "'"$MESSAGE_ID"'"}
 Extract: sender (from), date, subject, and the list of attachments (parts where `filename` is non-empty and `mimeType` is not `multipart/*`).
 
 **c) Download each attachment:**
+
+Note: `gws` returns attachment data as URL-safe base64 JSON (`{"data": "..."}`); the `-o` flag saves the raw JSON, not the decoded binary. Decode inline:
+
 ```bash
-gws gmail users messages attachments get --params '{"userId": "me", "messageId": "'"$MESSAGE_ID"'", "id": "'"$ATTACHMENT_ID"'"}' -o "$STAGING_DIR/$MONTH/<filename>"
+gws gmail users messages attachments get \
+  --params '{"userId": "me", "messageId": "'"$MESSAGE_ID"'", "id": "'"$ATTACHMENT_ID"'"}' \
+  --format json 2>/dev/null \
+  | python3 -c "import sys,json,base64; sys.stdout.buffer.write(base64.urlsafe_b64decode(json.load(sys.stdin)['data']+'=='))" \
+  > "$STAGING_DIR/$MONTH/<filename>"
 ```
 
 Use the original filename from the message. If two files have the same name, append the message_id as suffix.
