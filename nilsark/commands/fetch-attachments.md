@@ -62,10 +62,10 @@ gws drive files list --params '{"q": "name='\''.nilsark'\'' and '\''<MONTH_FOLDE
 gws drive files create --json '{"name": ".nilsark", "mimeType": "application/vnd.google-apps.folder", "parents": ["<MONTH_FOLDER_ID>"]}'
 ```
 
-Find and download state.md from the `.nilsark` folder:
+Find and download state.md from the `.nilsark` folder. Capture the file ID — you will need it for the upload step:
 ```bash
-gws drive files list --params '{"q": "name='\''state.md'\'' and '\''<NILSARK_FOLDER_ID>'\'' in parents and trashed=false"}' --format json
-cd "$STAGING_DIR/.state" && gws drive files get --params '{"fileId": "<STATE_FILE_ID>", "alt": "media"}' -o "$MONTH-state.md"
+STATE_FILE_ID=$(gws drive files list --params '{"q": "name='\''state.md'\'' and '\''<NILSARK_FOLDER_ID>'\'' in parents and trashed=false"}' --format json | jq -r '.files[0].id // empty')
+cd "$STAGING_DIR/.state" && gws drive files get --params '{"fileId": "'$STATE_FILE_ID'", "alt": "media"}' -o "$MONTH-state.md"
 ```
 
 If state.md does not exist yet, create it from the template defined in the `nilsark:accounting-state` skill (see First Run section).
@@ -118,12 +118,16 @@ If any step (b, c) fails, append the row with status `error` and continue to the
 
 ## Step 8 — Upload Updated state.md
 
-Upload the modified state.md back to Drive:
-```bash
-gws drive +upload "$STAGING_DIR/.state/$MONTH-state.md" --parent <NILSARK_FOLDER_ID> --name state.md
-```
-
-If a state.md already exists in Drive, this overwrites it.
+Upload the modified state.md back to Drive — update in-place if the file already exists, otherwise create:
+- If `$STATE_FILE_ID` is set (normal case):
+  ```bash
+  gws drive files update --params '{"fileId": "'$STATE_FILE_ID'"}' \
+    --upload "$STAGING_DIR/.state/$MONTH-state.md" --upload-content-type text/markdown
+  ```
+- If `$STATE_FILE_ID` is empty (first run — no state.md in Drive yet):
+  ```bash
+  cd "$STAGING_DIR/.state" && gws drive +upload "$MONTH-state.md" --parent <NILSARK_FOLDER_ID> --name state.md
+  ```
 
 ## Step 9 — Print Summary
 

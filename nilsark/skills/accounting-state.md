@@ -22,18 +22,24 @@ Every command that reads or writes state follows this pattern:
    gws drive files create --json '{"name": ".nilsark", "mimeType": "application/vnd.google-apps.folder", "parents": ["<month_folder_id>"]}'
    ```
 
-2. **Download** state.md from the `.nilsark` folder to local temp (`$STAGING_DIR/.state/YYYY-MM-state.md`):
+2. **Download** state.md from the `.nilsark` folder to local temp (`$STAGING_DIR/.state/YYYY-MM-state.md`). Capture the file ID — you will need it for the upload step:
    ```bash
-   gws drive files list --params '{"q": "name='\''state.md'\'' and '\''<nilsark_folder_id>'\'' in parents and trashed=false"}' --format json
-   gws drive files get --params '{"fileId": "<state_file_id>", "alt": "media"}' -o $STAGING_DIR/.state/YYYY-MM-state.md
+   STATE_FILE_ID=$(gws drive files list --params '{"q": "name='\''state.md'\'' and '\''<nilsark_folder_id>'\'' in parents and trashed=false"}' --format json | jq -r '.files[0].id // empty')
+   cd "$STAGING_DIR/.state" && gws drive files get --params '{"fileId": "'$STATE_FILE_ID'", "alt": "media"}' -o YYYY-MM-state.md
    ```
 
 3. **Modify** in memory (parse → update → write to temp file)
 
-4. **Upload** back to Drive (overwrite existing)
-   ```bash
-   gws drive +upload $STAGING_DIR/.state/YYYY-MM-state.md --parent <nilsark_folder_id> --name state.md
-   ```
+4. **Upload** back to Drive — update in-place if the file already exists, otherwise create:
+   - If `$STATE_FILE_ID` is set (normal case):
+     ```bash
+     gws drive files update --params '{"fileId": "'$STATE_FILE_ID'"}' \
+       --upload $STAGING_DIR/.state/YYYY-MM-state.md --upload-content-type text/markdown
+     ```
+   - If `$STATE_FILE_ID` is empty (first run — no state.md in Drive yet):
+     ```bash
+     cd "$STAGING_DIR/.state" && gws drive +upload YYYY-MM-state.md --parent <nilsark_folder_id> --name state.md
+     ```
 
 **Important:** Do not leave state.md in an inconsistent state. Always upload after modifying. If the upload fails, report the error — do not silently discard changes.
 
