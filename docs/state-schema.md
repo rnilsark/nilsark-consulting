@@ -2,7 +2,7 @@
 
 Each month has a `state.md` file in Google Drive at:
 ```
-DRIVE_ROOT_FOLDER_ID/YYYY-MM/state.md
+DRIVE_ROOT_FOLDER_ID/YYYY-MM/.nilsark/state.md
 ```
 
 This file is the single source of truth for all processing status. Every command downloads it, modifies it in memory, and uploads it back before finishing.
