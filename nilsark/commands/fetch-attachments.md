@@ -49,7 +49,7 @@ gws drive files list --params '{"q": "name='\'''"$MONTH"'\'' and '\'''"$DRIVE_RO
 If the month folder exists, get its ID and download state.md:
 ```bash
 gws drive files list --params '{"q": "name='\''state.md'\'' and '\''<MONTH_FOLDER_ID>'\'' in parents"}' --format json
-gws drive files get --params '{"fileId": "<STATE_FILE_ID>", "alt": "media"}' -o "$STAGING_DIR/.state/$MONTH-state.md"
+cd "$STAGING_DIR/.state" && gws drive files get --params '{"fileId": "<STATE_FILE_ID>", "alt": "media"}' -o "$MONTH-state.md"
 ```
 
 If the month folder does not exist yet, create it:
