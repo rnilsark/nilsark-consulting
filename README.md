@@ -28,7 +28,7 @@ All state lives in Google Drive (`state.md` per month). Local staging is tempora
 ## Prerequisites
 
 - **Claude Code CLI** (`claude`) — `npm install -g @anthropic-ai/claude-code`
-- **gws CLI** — `npm install -g @googleworkspace/cli` then `claude plugin marketplace add https://github.com/WadeWarren/gws-claude-plugin && claude plugin install gws`
+- **gws CLI** — `npm install -g @googleworkspace/cli`
 - **git**
 - WSL2 (Windows) or macOS
 
@@ -52,13 +52,7 @@ gws auth login
 
 This opens a browser for Google OAuth. Credentials are stored in `~/.gws/`. You must re-run this on each new machine.
 
-### 3. Authenticate gws
-
-```bash
-gws auth login
-```
-
-### 4. Create your config file
+### 3. Create your config file
 
 ```bash
 cp /mnt/c/dev/nilsark-consulting/config.template.md ~/.nilsark-config.md
@@ -70,13 +64,13 @@ Edit `~/.nilsark-config.md` and fill in:
 - Fortnox email addresses
 - Your email
 
-### 5. Create your local staging folder
+### 4. Create your local staging folder
 
 ```bash
 mkdir -p /mnt/c/Users/YourName/Desktop/nilsark-staging
 ```
 
-### 6. Register plugins permanently
+### 5. Register plugins permanently
 
 Add to `~/.claude/settings.json`:
 

@@ -16,17 +16,8 @@ Verify: `claude --version`
 
 ### gws CLI (Google Workspace)
 
-The `gws` CLI is a separate npm package. Install it first:
-
 ```bash
 npm install -g @googleworkspace/cli
-```
-
-Then install the Claude Code skills plugin (teaches Claude how to use it):
-
-```bash
-claude plugin marketplace add https://github.com/WadeWarren/gws-claude-plugin
-claude plugin install gws
 ```
 
 Verify: `gws --version`
@@ -131,7 +122,7 @@ After installing, just run `claude` — no flags needed. Type `/help` to verify 
 ## Troubleshooting
 
 ### `gws: command not found`
-Try `claude plugin install gws` again. Check that `~/.claude/bin/` is in your PATH.
+Run `npm install -g @googleworkspace/cli` again. Check that your npm global bin is in your PATH.
 
 ### `gws auth login` doesn't open a browser (WSL2)
 Run `explorer.exe "$(gws auth login 2>&1 | grep https)"` to open the auth URL in Windows browser. Or copy-paste the URL manually.
