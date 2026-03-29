@@ -40,58 +40,78 @@ For each unclassified file:
 
 **a) Read the file.** Use the Read tool to read the PDF natively. Claude can read PDF content directly.
 
-**b) Classify** using the `classify-invoice` skill rules:
-- `leverantorsfaktura` — has Förfallodatum
-- `kvitto` — no due date, shows completed payment
+**b) Check for companion receipt (invoice+receipt pairs).**
+
+Look up this file's message_id in the Processed Gmail Messages table. If that same message_id produced multiple attachment files, and one of those other files is already recorded in the Documents table as `kvitto`, then this file is likely the companion invoice for an already-filed receipt. Skip it and record it in state as `skipped — covered by companion receipt`. Do not upload to Drive.
+
+**c) Classify** using the `classify-invoice` skill rules:
+- `skattekonto` — from Skatteverket, shows skattekonto balance with tax line items
+- `kvitto` — auto-charged to card, or shows completed payment with no manual payment step
+- `leverantorsfaktura` — has Förfallodatum and requires manual payment
 - `unknown` — ambiguous or unreadable
 
-**c) Extract fields** using the `extract-invoice-fields` skill:
+**d) Extract fields** using the `extract-invoice-fields` skill:
 - All documents: `supplier`, `amount`, `currency`, `vat_amount`
-- Leverantörsfaktura only: `due_date`, `ocr_number`, `bank_account`
+- Leverantörsfaktura and skattekonto: `due_date`, `ocr_number`, `bank_account`
 
-**d) Determine Drive target folder:**
+**e) Determine Drive target folder:**
 
-- **kvitto** → upload to `YYYY-MM/Verifikationer/`
-- **leverantörsfaktura** → upload to `YYYY-MM/Verifikationer/Leverantörsfakturor/`
+- **kvitto** → `YYYY-MM/Verifikationer/`
+- **leverantörsfaktura** → `YYYY-MM/Verifikationer/Leverantörsfakturor/`
+- **skattekonto** → `YYYY-MM/Skattekonto/`
+- **unknown** → `YYYY-MM/Verifikationer/`
 
-Find the subfolder ID:
+Find/create subfolders as needed:
 ```bash
 # Find Verifikationer folder
-gws drive files list --params '{"q": "name='\''Verifikationer'\'' and '\''<MONTH_FOLDER_ID>'\'' in parents and mimeType='\''application/vnd.google-apps.folder'\''"}' --format json
-```
+gws drive files list --params '{"q": "name='\''Verifikationer'\'' and '\''<MONTH_FOLDER_ID>'\'' in parents and mimeType='\''application/vnd.google-apps.folder'\'' and trashed=false"}' --format json
 
-If the folder does not exist, create it:
-```bash
+# If not found, create it
 gws drive files create --json '{"name": "Verifikationer", "mimeType": "application/vnd.google-apps.folder", "parents": ["<MONTH_FOLDER_ID>"]}'
+
+# Find/create Leverantörsfakturor inside Verifikationer
+gws drive files list --params '{"q": "name='\''Leverantörsfakturor'\'' and '\''<VERIFIKATIONER_FOLDER_ID>'\'' in parents and mimeType='\''application/vnd.google-apps.folder'\'' and trashed=false"}' --format json
+
+# Find/create Skattekonto directly under month folder
+gws drive files list --params '{"q": "name='\''Skattekonto'\'' and '\''<MONTH_FOLDER_ID>'\'' in parents and mimeType='\''application/vnd.google-apps.folder'\'' and trashed=false"}' --format json
 ```
 
-For leverantörsfaktura, also find/create `Leverantörsfakturor` inside `Verifikationer`:
-```bash
-gws drive files list --params '{"q": "name='\''Leverantörsfakturor'\'' and '\''<VERIFIKATIONER_FOLDER_ID>'\'' in parents and mimeType='\''application/vnd.google-apps.folder'\''"}' --format json
-```
-
-**e) Upload to Drive:**
+**f) Upload to Drive:**
 ```bash
 gws drive +upload "$STAGING_DIR/$MONTH/<filename>" --parent <TARGET_FOLDER_ID>
 ```
 
-Record the Drive path as: `YYYY-MM/Verifikationer/<filename>` or `YYYY-MM/Verifikationer/Leverantörsfakturor/<filename>`
+Record the Drive path as appropriate:
+- `YYYY-MM/Verifikationer/<filename>`
+- `YYYY-MM/Verifikationer/Leverantörsfakturor/<filename>`
+- `YYYY-MM/Skattekonto/<filename>`
 
-**f) Append row to Documents table** in state.md:
+**g) Append row to Documents table** in state.md:
 ```
-| <filename> | <type> | <supplier> | <amount> | <currency> | <due_date> | <ocr_number> | <bank_account> | <vat_amount> | <drive_path> | unpaid | no |
+| <filename> | <type> | <supplier> | <amount> | <currency> | <due_date> | <ocr_number> | <bank_account> | <vat_amount> | <drive_path> | <payment_status> | no |
 ```
 
 Set `payment_status`:
-- `unpaid` for leverantörsfaktura
+- `unpaid` for leverantörsfaktura and skattekonto
 - `n/a` for kvitto
-- `unknown` documents: set all financial fields to blank, `payment_status=n/a`, note in a comment
+- `n/a` for unknown documents (set all financial fields to blank)
 
 Also update the matching row in the Processed Gmail Messages table: change `status` from `downloaded` to `classified`.
 
 ## Step 6 — Update Month Summary
 
-Recount all rows and update the Month Summary section.
+Recount all rows and update the Month Summary section:
+
+```
+- Documents processed: N
+- Leverantörsfakturor: N
+- Kvitton: N
+- Skattekonto: N
+- Total VAT: N SEK
+- Unpaid invoices: N  (leverantörsfakturor + skattekonto with payment_status=unpaid)
+- Month-close sent: no
+- Month-close date:
+```
 
 ## Step 7 — Upload state.md
 
@@ -100,10 +120,11 @@ Upload the updated state.md back to Drive.
 ## Step 8 — Print Summary
 
 ```
-Classification complete for 2026-03:
+Classification complete for YYYY-MM:
   Leverantörsfakturor: N
   Kvitton: M
-  Unknown (manual review needed): K
+  Skattekonto: K
+  Unknown (manual review needed): U
 
 Documents needing review:
   - <filename>: <reason>

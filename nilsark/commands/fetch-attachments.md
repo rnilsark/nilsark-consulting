@@ -41,14 +41,16 @@ mkdir -p "$STAGING_DIR/.state"
 
 ## Step 4 — Download or Initialize state.md
 
+**Important:** Always run the Drive queries below fresh — never reuse folder IDs or file IDs from a previous conversation turn or prior run.
+
 Find the month folder in Drive:
 ```bash
-gws drive files list --params '{"q": "name='\'''"$MONTH"'\'' and '\'''"$DRIVE_ROOT_FOLDER_ID"'\'' in parents and mimeType='\''application/vnd.google-apps.folder'\''"}' --format json
+gws drive files list --params '{"q": "name='\'''"$MONTH"'\'' and '\'''"$DRIVE_ROOT_FOLDER_ID"'\'' in parents and mimeType='\''application/vnd.google-apps.folder'\'' and trashed=false"}' --format json
 ```
 
 If the month folder exists, get its ID and download state.md:
 ```bash
-gws drive files list --params '{"q": "name='\''state.md'\'' and '\''<MONTH_FOLDER_ID>'\'' in parents"}' --format json
+gws drive files list --params '{"q": "name='\''state.md'\'' and '\''<MONTH_FOLDER_ID>'\'' in parents and trashed=false"}' --format json
 cd "$STAGING_DIR/.state" && gws drive files get --params '{"fileId": "<STATE_FILE_ID>", "alt": "media"}' -o "$MONTH-state.md"
 ```
 
@@ -77,6 +79,7 @@ If state.md does not exist yet, create it from this template (replace YYYY-MM wi
 - Documents processed: 0
 - Leverantörsfakturor: 0
 - Kvitton: 0
+- Skattekonto: 0
 - Total VAT: 0 SEK
 - Unpaid invoices: 0
 - Month-close sent: no

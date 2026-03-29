@@ -78,8 +78,9 @@ This file is the single source of truth for all processing status. Every command
 | `fortnox_sent` | enum | Whether routed to Fortnox |
 
 **Type values:**
-- `leverantorsfaktura` — supplier invoice billed to NILSARK, has förfallodatum
-- `kvitto` — receipt for completed purchase, no due date
+- `leverantorsfaktura` — supplier invoice billed to NILSARK, has förfallodatum, requires manual payment
+- `kvitto` — receipt for completed purchase, or invoice auto-charged to card; no manual payment needed
+- `skattekonto` — tax payment instruction from Skatteverket (arbetsgivaravgift, prelskatt, F-skatt); filed in `Skattekonto/` subfolder
 - `unknown` — could not be classified; requires manual review
 
 **Payment status values:**
@@ -123,6 +124,7 @@ Free-form key-value section updated by each command:
 - Documents processed: 12
 - Leverantörsfakturor: 5
 - Kvitton: 7
+- Skattekonto: 1
 - Total VAT: 4250 SEK
 - Unpaid invoices: 2
 - Month-close sent: no
