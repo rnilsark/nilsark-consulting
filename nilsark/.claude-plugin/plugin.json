@@ -2,6 +2,6 @@
   "name": "nilsark",
   "version": "1.0.0",
   "description": "Monthly accounting workflow commands for NILSARK CONSULTING AB. Orchestrates Gmail fetching, document classification, payment tracking, bank matching, and Fortnox routing.",
-  "author": "NILSARK CONSULTING AB",
+  "author": {"name": "NILSARK CONSULTING AB"},
   "license": "MIT"
 }

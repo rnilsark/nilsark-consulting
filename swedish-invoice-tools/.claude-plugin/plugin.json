@@ -2,6 +2,6 @@
   "name": "swedish-invoice-tools",
   "version": "1.0.0",
   "description": "Skills for classifying and processing Swedish AB accounting documents (leverantörsfakturor, kvitton, bank statements). Reusable for any Swedish company.",
-  "author": "NILSARK CONSULTING AB",
+  "author": {"name": "NILSARK CONSULTING AB"},
   "license": "MIT"
 }

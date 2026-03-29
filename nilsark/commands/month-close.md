@@ -1,9 +1,7 @@
 ---
-description: Close the accounting month — route all documents to Fortnox via email and mark state.md as closed. Use --dry-run to preview without sending. Usage: /month-close [YYYY-MM] [--dry-run]
+description: "Close the accounting month — route all documents to Fortnox via email and mark state.md as closed. Use --dry-run to preview without sending. Usage: /month-close [YYYY-MM] [--dry-run]"
 argument-hint: YYYY-MM [--dry-run]
-allowed-tools:
-  - Read
-  - Bash
+allowed-tools: ["Read", "Bash"]
 ---
 
 # Month Close — Route Documents to Fortnox

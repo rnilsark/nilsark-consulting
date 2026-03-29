@@ -1,9 +1,7 @@
 ---
-description: Match a SEB or Handelsbanken bank statement CSV from the staging folder against invoices in state.md. Updates payment status and reports unmatched transactions. Usage: /match-bank [YYYY-MM]
+description: "Match a SEB or Handelsbanken bank statement CSV from the staging folder against invoices in state.md. Updates payment status and reports unmatched transactions. Usage: /match-bank [YYYY-MM]"
 argument-hint: YYYY-MM (defaults to current month)
-allowed-tools:
-  - Read
-  - Bash
+allowed-tools: ["Read", "Bash"]
 ---
 
 # Match Bank Statement Transactions

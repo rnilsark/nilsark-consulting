@@ -1,8 +1,7 @@
 ---
-description: List all unpaid leverantörsfakturor for the month with due dates and amounts. Flags overdue items. Usage: /payments-due [YYYY-MM]
+description: "List all unpaid leverantörsfakturor for the month with due dates and amounts. Flags overdue items. Usage: /payments-due [YYYY-MM]"
 argument-hint: YYYY-MM (defaults to current month)
-allowed-tools:
-  - Bash
+allowed-tools: ["Bash"]
 ---
 
 # Unpaid Leverantörsfakturor

@@ -1,9 +1,7 @@
 ---
-description: Classify PDFs in the local staging folder, extract accounting fields, upload to the correct Drive subfolder, and update state.md. Usage: /classify [YYYY-MM]
+description: "Classify PDFs in the local staging folder, extract accounting fields, upload to the correct Drive subfolder, and update state.md. Usage: /classify [YYYY-MM]"
 argument-hint: YYYY-MM (defaults to current month)
-allowed-tools:
-  - Read
-  - Bash
+allowed-tools: ["Read", "Bash"]
 ---
 
 # Classify Accounting Documents
