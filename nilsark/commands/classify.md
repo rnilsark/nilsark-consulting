@@ -21,6 +21,8 @@ Use argument if provided, otherwise `date +%Y-%m`.
 
 ## Step 3 — Download state.md
 
+> **Auth guard:** If any `gws` command in this step exits with a non-zero code and its output contains "auth", "token", "unauthenticated", "unauthorized", or "login", stop immediately and run `/nilsark:gws-auth`. After the user completes auth, retry from this step.
+
 Follow the same download pattern as fetch-attachments (see accounting-state skill). Load the current state.md from `$STAGING_DIR/.state/$MONTH-state.md`.
 
 ## Step 4 — Find Unclassified Files

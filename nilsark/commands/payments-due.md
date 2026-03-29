@@ -21,6 +21,8 @@ Use argument if provided, otherwise `date +%Y-%m`.
 
 ## Step 3 — Download state.md
 
+> **Auth guard:** If any `gws` command in this step exits with a non-zero code and its output contains "auth", "token", "unauthenticated", "unauthorized", or "login", stop immediately and run `/nilsark:gws-auth`. After the user completes auth, retry from this step.
+
 Download state.md from Drive following the standard pattern (see accounting-state skill).
 
 ## Step 4 — Get Today's Date
