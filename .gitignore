@@ -15,3 +15,5 @@ staging/
 Thumbs.db
 *.swp
 *.swo
+
+.claude/plans

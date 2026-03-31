@@ -131,10 +131,10 @@ Shows all unpaid leverantörsfakturor with due dates and amounts. Flags overdue 
 
 ### Step 4 — Match bank statement
 
-Export your bank statement as CSV from SEB/Handelsbanken and drop it in your staging folder:
+Export your bank statement as CSV and upload it to the `.nilsark/` folder inside your month folder in Google Drive:
 
 ```
-$STAGING_DIR/2026-03/kontohändelser-2026-03.csv
+2026-03/.nilsark/kontohändelser-2026-03.csv
 ```
 
 Then run:
