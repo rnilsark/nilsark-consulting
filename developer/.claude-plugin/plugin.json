@@ -1,0 +1,7 @@
+{
+  "name": "developer",
+  "version": "1.0.0",
+  "description": "General-purpose developer skills for use across all client engagements. Portable tooling and workflows that are not client-specific.",
+  "author": {"name": "NILSARK CONSULTING AB"},
+  "license": "MIT"
+}

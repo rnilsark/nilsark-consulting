@@ -20,6 +20,13 @@
       "source": "./nilsark",
       "version": "1.0.0",
       "license": "MIT"
+    },
+    {
+      "name": "developer",
+      "description": "General-purpose developer skills for use across all client engagements",
+      "source": "./developer",
+      "version": "1.0.0",
+      "license": "MIT"
     }
   ]
 }
