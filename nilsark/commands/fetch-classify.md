@@ -1,12 +1,12 @@
 ---
-description: "Fetch Gmail attachments for the current (or specified) month and save them to the local staging folder. Skips already-processed messages. Safe to run multiple times. Usage: /fetch-attachments [YYYY-MM]"
+description: "Fetch and classify Gmail attachments for the current (or specified) month, uploading to Drive in a single pass. Safe to run multiple times. Usage: /fetch-classify [YYYY-MM]"
 argument-hint: YYYY-MM (defaults to current month)
-allowed-tools: ["Bash"]
+allowed-tools: ["Read", "Bash"]
 ---
 
-# Fetch Gmail Attachments
+# Fetch and Classify Attachments
 
-You are fetching email attachments for NILSARK CONSULTING AB's monthly accounting.
+You are fetching and classifying email attachments for NILSARK CONSULTING AB's monthly accounting.
 
 ## Step 1 — Read Config
 
@@ -82,7 +82,9 @@ gws gmail users messages list --params '{"userId": "me", "q": "has:attachment in
 
 This returns a list of message IDs.
 
-## Step 7 — Process Each Message
+## Step 7 — Download New Attachments
+
+Initialize an empty list: `NEWLY_DOWNLOADED=()`.
 
 For each message ID returned:
 
@@ -107,7 +109,7 @@ gws gmail users messages attachments get \
   > "$STAGING_DIR/$MONTH/<filename>"
 ```
 
-Use the original filename from the message. If two files have the same name, append the message_id as suffix.
+Use the original filename from the message. If two files have the same name, append the message_id as suffix. Add each successfully downloaded filename to `NEWLY_DOWNLOADED`.
 
 **d) Update state.md:** Append a row to the Processed Gmail Messages table:
 ```
@@ -116,9 +118,79 @@ Use the original filename from the message. If two files have the same name, app
 
 If any step (b, c) fails, append the row with status `error` and continue to the next message. Do not abort.
 
-## Step 8 — Upload Updated state.md
+## Step 8 — Classify New Files
 
-Upload the modified state.md back to Drive — update in-place if the file already exists, otherwise create:
+For each filename in `NEWLY_DOWNLOADED`: skip it if it is already present in the Documents table (matched by filename). If no files remain after this check, skip to Step 9.
+
+**a) Read the file.** Use the Read tool to open the PDF.
+
+**b) Check for companion receipt (invoice+receipt pairs).**
+
+Look up this file's message_id by finding its row in the Processed Gmail Messages table (match by filename). If that same message_id produced multiple attachments and another is already in the Documents table as `kvitto`, update this row's status to `skipped — covered by companion receipt`, skip steps c–g, and continue to the next file. Do not upload to Drive.
+
+**c) Classify** by reading `swedish-invoice-tools/skills/classify-invoice.md` and applying its decision tree to the document. Do not classify from your own reasoning — follow the skill's rules explicitly.
+
+**d) Extract fields** using the `extract-invoice-fields` skill.
+
+**e) Determine Drive target folder:**
+
+- **kvitto** → `YYYY-MM/Verifikationer/`
+- **leverantörsfaktura** → `YYYY-MM/Leverantörsfakturor/`
+- **skattekonto** → `YYYY-MM/Skattekonto/`
+- **unknown** → `YYYY-MM/Verifikationer/`
+
+Find/create the target subfolder under the month folder as needed:
+```bash
+# Find Verifikationer folder (for kvitto + unknown)
+gws drive files list --params '{"q": "name='\''Verifikationer'\'' and '\''<MONTH_FOLDER_ID>'\'' in parents and mimeType='\''application/vnd.google-apps.folder'\'' and trashed=false"}' --format json
+
+# If not found, create it
+gws drive files create --json '{"name": "Verifikationer", "mimeType": "application/vnd.google-apps.folder", "parents": ["<MONTH_FOLDER_ID>"]}'
+
+# Find/create Leverantörsfakturor directly under month folder
+gws drive files list --params '{"q": "name='\''Leverantörsfakturor'\'' and '\''<MONTH_FOLDER_ID>'\'' in parents and mimeType='\''application/vnd.google-apps.folder'\'' and trashed=false"}' --format json
+
+# Find/create Skattekonto directly under month folder
+gws drive files list --params '{"q": "name='\''Skattekonto'\'' and '\''<MONTH_FOLDER_ID>'\'' in parents and mimeType='\''application/vnd.google-apps.folder'\'' and trashed=false"}' --format json
+```
+
+**f) Upload to Drive:**
+```bash
+gws drive +upload "$STAGING_DIR/$MONTH/<filename>" --parent <TARGET_FOLDER_ID>
+```
+
+Record the Drive path (e.g. `2026-03/Verifikationer/<filename>`).
+
+**g) Append row to Documents table** in state.md:
+```
+| <filename> | <type> | <supplier> | <amount> | <currency> | <due_date> | <ocr_number> | <bank_account> | <vat_amount> | <drive_path> | <payment_status> | no |
+```
+
+Set `payment_status`:
+- `unpaid` for leverantörsfaktura and skattekonto
+- `n/a` for kvitto
+- `n/a` for unknown documents (leave all financial fields blank)
+
+Also update the matching row in the Processed Gmail Messages table (match by message_id from step b): if the current status is `downloaded`, change it to `classified`. Skip the update entirely for rows with status `error`.
+
+## Step 9 — Update Month Summary
+
+Recount all rows and update the Month Summary section:
+
+```
+- Documents processed: N
+- Leverantörsfakturor: N
+- Kvitton: N
+- Skattekonto: N
+- Total VAT: N SEK
+- Unpaid invoices: N  (leverantörsfakturor + skattekonto with payment_status=unpaid)
+- Month-close sent: no
+- Month-close date:
+```
+
+## Step 10 — Upload state.md
+
+Upload the modified state.md back to Drive: — update in-place if the file already exists, otherwise create:
 - If `$STATE_FILE_ID` is set (normal case):
   ```bash
   gws drive files update --params '{"fileId": "'$STATE_FILE_ID'"}' \
@@ -129,14 +201,23 @@ Upload the modified state.md back to Drive — update in-place if the file alrea
   cd "$STAGING_DIR/.state" && gws drive +upload "$MONTH-state.md" --parent <NILSARK_FOLDER_ID> --name state.md
   ```
 
-## Step 9 — Print Summary
+## Step 11 — Print Summary
 
 ```
-Fetch complete for 2026-03:
-  New messages processed: N
-  Attachments downloaded: M
+Fetch + classify complete for 2026-03:
+  New messages fetched: N  (M attachments)
   Messages skipped (already processed): K
+  Classified — leverantörsfakturor: A
+  Classified — kvitton: B
+  Classified — skattekonto: C
+  Unknown (manual review needed): U
   Errors: E (check state.md for details)
 
 Files saved to: $STAGING_DIR/2026-03/
+```
+
+If U > 0, list the unknown files and the reason classification was uncertain:
+```
+Documents needing review:
+  - <filename>: <reason>
 ```
