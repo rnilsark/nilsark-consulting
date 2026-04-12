@@ -26,7 +26,17 @@ First check local staging:
 ls "$STAGING_DIR/$MONTH/"*.csv 2>/dev/null
 ```
 
-If no CSV found locally, check the `.nilsark/` folder in Drive (same folder as state.md — resolve `<NILSARK_FOLDER_ID>` from Step 4 first if needed):
+- If exactly one CSV is found locally: use it. Skip the Drive check entirely.
+- If multiple CSVs are found locally: list them and ask the user which one to use before continuing.
+- If no CSV found locally: proceed to Step 4 first to resolve `NILSARK_FOLDER_ID`, then return here.
+
+## Step 4 — Download state.md
+
+> **Auth guard:** If any `gws` command in this command exits with a non-zero code and its output contains "auth", "token", "unauthenticated", "unauthorized", or "login", stop immediately and run `/nilsark:gws-auth`. After the user completes auth, retry from this step. This guard applies to all gws calls in all subsequent steps.
+
+Download state.md from Drive using the standard pattern (see `nilsark:accounting-state` skill). This resolves `NILSARK_FOLDER_ID` as a side-effect.
+
+**If no local CSV was found in Step 3**, check the `.nilsark/` folder in Drive after completing the state.md download:
 ```bash
 gws drive files list --params '{"q": "'\''<NILSARK_FOLDER_ID>'\'' in parents and trashed=false and name contains '\''.csv'\''"}' --format json
 ```
@@ -36,13 +46,9 @@ If a CSV is found in Drive: download it to `$STAGING_DIR/$MONTH/` and proceed:
 gws drive files get --params '{"fileId": "<CSV_FILE_ID>", "alt": "media"}' -o "$STAGING_DIR/$MONTH/<filename>"
 ```
 
-- If exactly one CSV is found (locally or in Drive): use it.
-- If multiple CSVs are found: list them and ask the user which one to use before continuing.
+- If exactly one CSV is found in Drive: use it.
+- If multiple CSVs are found in Drive: list them and ask the user which one to use before continuing.
 - If no CSV is found anywhere: stop and tell the user to export their bank statement CSV and upload it to `YYYY-MM/.nilsark/` in Google Drive, then re-run.
-
-## Step 4 — Download state.md
-
-Download state.md from Drive using the standard pattern (see `nilsark:accounting-state` skill).
 
 ## Step 5 — Read and Parse the CSV
 
@@ -51,7 +57,7 @@ Use the Read tool to read the CSV file. Apply the `match-bank-transactions` skil
 ## Step 6 — Build Invoice List
 
 From the Documents table in state.md, collect all rows where:
-- `type = leverantorsfaktura`
+- `type = leverantörsfaktura`
 - `payment_status` is `unpaid` or `overdue`
 
 ## Step 7 — Match Transactions
@@ -88,7 +94,7 @@ Unmatched bank transactions (outgoing, no invoice found):
   - 2026-03-25 | ICA Maxi | -1 200,00 SEK
 
 → If any of these are paper receipts, email them to yourself so they
-  appear in the next /fetch-attachments run.
+  appear in the next /fetch-classify run.
 
 Still unpaid invoices:
   - Fortnox AB — 450,00 SEK — due 2026-04-10
