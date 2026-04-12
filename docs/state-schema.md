@@ -19,8 +19,8 @@ This file is the single source of truth for all processing status. Every command
 |------------|------|------|---------|-------------------|--------|
 
 ## Documents
-| file | type | supplier | amount | currency | due_date | ocr_number | bank_account | vat_amount | drive_path | payment_status | fortnox_sent |
-|------|------|---------|--------|----------|---------|-----------|-------------|-----------|-----------|---------------|-------------|
+| file | type | supplier | amount | currency | due_date | ocr_number | bank_account | vat_amount | drive_path | drive_file_id | payment_status | fortnox_sent |
+|------|------|---------|--------|----------|---------|-----------|-------------|-----------|-----------|--------------|---------------|-------------|
 
 ## Bank Statement Transactions
 | date | description | amount | currency | matched_to_file | match_confidence |
@@ -30,6 +30,7 @@ This file is the single source of truth for all processing status. Every command
 - Documents processed: 0
 - Leverantörsfakturor: 0
 - Kvitton: 0
+- Skattekonto: 0
 - Total VAT: 0 SEK
 - Unpaid invoices: 0
 - Month-close sent: no
@@ -40,7 +41,7 @@ This file is the single source of truth for all processing status. Every command
 
 ## Table: Processed Gmail Messages
 
-**Purpose:** Deduplication. Before downloading any attachment, the fetch command checks this table. If the `message_id` is present with status other than `error`, it is skipped.
+**Purpose:** Deduplication. Before downloading any attachment, the fetch command checks this table. If all rows for a `message_id` have status `classified` or `skipped — covered by companion receipt`, the message is skipped (fully processed). If any row has status `downloaded` or `error`, the message is re-processed — `downloaded` means an attachment was fetched but classification never completed.
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -52,9 +53,10 @@ This file is the single source of truth for all processing status. Every command
 | `status` | enum | See values below |
 
 **Status values:**
-- `downloaded` — attachment saved to local staging
-- `classified` — classify command has processed this file
+- `downloaded` — attachment saved to local staging (triggers re-processing on next run if not yet classified)
+- `classified` — fetch-classify has successfully classified and uploaded this file
 - `error` — download or processing failed; will be retried on next run
+- `skipped — covered by companion receipt` — invoice suppressed because a matching kvitto from the same message was already classified; treated as fully processed for deduplication (a message_id with only this status is skipped on re-run)
 
 ---
 
@@ -74,11 +76,12 @@ This file is the single source of truth for all processing status. Every command
 | `bank_account` | string | Bankgiro (XXXXXX-X) or plusgiro (XXXXX-X) |
 | `vat_amount` | decimal | Moms in SEK |
 | `drive_path` | string | Full path in Drive (e.g. `2026-03/Leverantörsfakturor/faktura.pdf`) |
+| `drive_file_id` | string | Google Drive file ID — used by month-close to download without an extra lookup |
 | `payment_status` | enum | Payment status |
 | `fortnox_sent` | enum | Whether routed to Fortnox |
 
 **Type values:**
-- `leverantorsfaktura` — supplier invoice billed to NILSARK, has förfallodatum, requires manual payment
+- `leverantörsfaktura` — supplier invoice billed to NILSARK, has förfallodatum, requires manual payment
 - `kvitto` — receipt for completed purchase, or invoice auto-charged to card; no manual payment needed
 - `skattekonto` — tax payment instruction from Skatteverket (arbetsgivaravgift, prelskatt, F-skatt); filed in `Skattekonto/` subfolder
 - `unknown` — could not be classified; requires manual review
@@ -138,5 +141,5 @@ Free-form key-value section updated by each command:
 ## Notes
 
 - **Concurrent access:** Do not run two commands simultaneously — the download-modify-upload cycle has no locking. Run commands sequentially.
-- **State file location:** `state.md` lives in the Drive month folder root, alongside `Kontohändelser.pdf` and the outgoing invoice.
+- **State file location:** `state.md` lives in `YYYY-MM/.nilsark/state.md` — inside the `.nilsark` subfolder of the month folder, not in the month folder root.
 - **First run:** If no `state.md` exists for the month, the fetch command creates one from this template.

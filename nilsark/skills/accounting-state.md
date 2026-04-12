@@ -15,17 +15,24 @@ DRIVE_ROOT_FOLDER_ID/YYYY-MM/.nilsark/state.md
 
 Every command that reads or writes state follows this pattern:
 
-1. **Resolve the `.nilsark` subfolder** within the month folder (find or create it):
+1. **Resolve the `.nilsark` subfolder** within the month folder (find or create it). Assign the result to `NILSARK_FOLDER_ID`:
    ```bash
-   gws drive files list --params '{"q": "name='\''.nilsark'\'' and '\''<month_folder_id>'\'' in parents and mimeType='\''application/vnd.google-apps.folder'\'' and trashed=false"}' --format json
-   # If not found:
-   gws drive files create --json '{"name": ".nilsark", "mimeType": "application/vnd.google-apps.folder", "parents": ["<month_folder_id>"]}'
+   NILSARK_LIST=$(gws drive files list --params '{"q": "name='\''.nilsark'\'' and '\''<month_folder_id>'\'' in parents and mimeType='\''application/vnd.google-apps.folder'\'' and trashed=false"}' --format json)
+   # If the command failed (non-zero exit or non-JSON output), stop — do not create a folder on a transient error.
+   NILSARK_FOLDER_ID=$(echo "$NILSARK_LIST" | jq -r '.files[0].id // empty')
+   # Only create if list succeeded AND NILSARK_FOLDER_ID is still empty:
+   if [ -z "$NILSARK_FOLDER_ID" ]; then
+     NILSARK_FOLDER_ID=$(gws drive files create --json '{"name": ".nilsark", "mimeType": "application/vnd.google-apps.folder", "parents": ["<month_folder_id>"]}' --format json | jq -r '.id')
+   fi
    ```
 
 2. **Download** state.md from the `.nilsark` folder to local temp (`$STAGING_DIR/.state/YYYY-MM-state.md`). Capture the file ID — you will need it for the upload step:
    ```bash
-   STATE_FILE_ID=$(gws drive files list --params '{"q": "name='\''state.md'\'' and '\''<nilsark_folder_id>'\'' in parents and trashed=false"}' --format json | jq -r '.files[0].id // empty')
-   cd "$STAGING_DIR/.state" && gws drive files get --params '{"fileId": "'$STATE_FILE_ID'", "alt": "media"}' -o YYYY-MM-state.md
+   STATE_LIST=$(gws drive files list --params '{"q": "name='\''state.md'\'' and '\'''"$NILSARK_FOLDER_ID"'\'' in parents and trashed=false"}' --format json)
+   # If the command failed (non-zero exit or non-JSON output), stop — do not create from template on a transient error.
+   STATE_FILE_ID=$(echo "$STATE_LIST" | jq -r '.files[0].id // empty')
+   # Only download if STATE_FILE_ID is non-empty (empty = genuine first run → create from template):
+   [ -n "$STATE_FILE_ID" ] && cd "$STAGING_DIR/.state" && gws drive files get --params '{"fileId": "'$STATE_FILE_ID'", "alt": "media"}' -o YYYY-MM-state.md
    ```
 
 3. **Modify** in memory (parse → update → write to temp file)
@@ -68,7 +75,9 @@ State.md uses markdown tables. Parse each row by:
 
 Before downloading a Gmail attachment, check the Processed Gmail Messages table:
 ```
-If message_id exists in the table AND status != 'error' → skip this message
+If message_id exists in the table AND ALL rows for that message_id have status = 'classified'
+  OR status = 'skipped — covered by companion receipt' → skip this message (fully processed)
+If any row has status 'downloaded' or 'error' → re-process (classification was never completed)
 ```
 
 ## Appending Rows
@@ -77,7 +86,7 @@ To add a new row to a table, append it after the last data row (before the next 
 
 Example — appending to Documents table:
 ```markdown
-| faktura-telia-2026-03.pdf | leverantorsfaktura | Telia Sverige AB | 1250.00 | SEK | 2026-04-15 | 1234567890 | BG 123456-7 | 250.00 | 2026-03/Verifikationer/Leverantörsfakturor/faktura-telia-2026-03.pdf | unpaid | no |
+| faktura-telia-2026-03.pdf | leverantörsfaktura | Telia Sverige AB | 1250.00 | SEK | 2026-04-15 | 1234567890 | BG 123456-7 | 250.00 | 2026-03/Leverantörsfakturor/faktura-telia-2026-03.pdf | 1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74 | unpaid | no |
 ```
 
 ## Updating Existing Rows
