@@ -1,5 +1,5 @@
 ---
-name: parallel-code-review
+name: review
 description: Run 5 parallel code review agents, each with a specific focus area. Use when the user asks to review code, review changes, run a parallel review, review a branch, review staged changes, review the last N commits, or says "review my code".
 ---
 

@@ -1,7 +1,7 @@
 {
   "name": "developer",
   "version": "1.0.0",
-  "description": "General-purpose developer skills for use across all client engagements. Portable tooling and workflows that are not client-specific.",
+  "description": "Developer skills and workflows. Includes general tooling (parallel code review) and C#-specific cleanup (remove-ai-slop). Not all skills are portable across all client engagements — check individual skill descriptions.",
   "author": {"name": "NILSARK CONSULTING AB"},
   "license": "MIT"
 }

@@ -1,6 +1,6 @@
 ---
 name: remove-ai-slop
-description: Remove AI-generated code slop and clean up C# code style. Use when cleaning up code, reviewing for style issues, removing unnecessary comments, removing unnecessary null checks, simplifying over-engineered abstractions, or when the user says the code looks AI-generated or needs a cleanup pass. ALWAYS apply this skill after writing or editing C# code — treat it as the final step of every code change before presenting the result to the user.
+description: Remove AI-generated code slop and clean up C# code style. C#-specific (dotnet build/test, var everywhere, _camelCase, file-scoped namespaces). Use when cleaning up code, reviewing for style issues, removing unnecessary comments, removing unnecessary null checks, simplifying over-engineered abstractions, or when the user says the code looks AI-generated or needs a cleanup pass. ALWAYS apply this skill after writing or editing C# code — treat it as the final step of every code change before presenting the result to the user.
 ---
 
 # Remove AI Slop & Clean Up Code Style
