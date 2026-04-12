@@ -31,7 +31,7 @@ Use argument if provided (ignoring `--dry-run`), otherwise `date +%Y-%m`.
 
 ## Step 3 — Download state.md
 
-> **Auth guard:** If any `gws` command in this step exits with a non-zero code and its output contains "auth", "token", "unauthenticated", "unauthorized", or "login", stop immediately and run `/nilsark:gws-auth`. After the user completes auth, retry from this step.
+> **Auth guard:** If any `gws` command in this command exits with a non-zero code and its output contains "auth", "token", "unauthenticated", "unauthorized", or "login", stop immediately and run `/nilsark:gws-auth`. After the user completes auth, retry from this step. This guard applies to all gws calls in all subsequent steps, not just Step 3.
 
 Download state.md from Drive (see `nilsark:accounting-state` skill for the download pattern).
 
@@ -44,23 +44,24 @@ If yes and NOT in dry-run mode: stop and tell the user:
 
 ## Step 5 — Build Routing Plan
 
-Process each Drive subfolder in order. For each folder, if the corresponding config email is empty → skip it entirely and log `skipped — FORTNOX_EMAIL_X not configured`.
+Process each document type in order. For each type, if the corresponding config email is empty → skip it entirely and log `skipped — FORTNOX_EMAIL_X not configured`.
 
-**Verifikationer/** → `$FORTNOX_VERIFIKATION`
+**Verifikationer** → `$FORTNOX_VERIFIKATION`
 - From state.md: all rows where `type = kvitto` and `fortnox_sent = no`
-- Method: forward original Gmail message if `message_id` is available; else download from Drive and send as attachment
+- Method: download all PDFs from Drive, send as ONE email with all attached
 
-**Leverantörsfakturor/** → `$FORTNOX_LEVERANTORSFAKTURA`
+**Leverantörsfakturor** → `$FORTNOX_LEVERANTORSFAKTURA`
 - From state.md: all rows where `type = leverantörsfaktura` and `fortnox_sent = no`
-- Method: forward original Gmail message if `message_id` is available; else download from Drive and send as attachment
+- Method: download all PDFs from Drive, send as ONE email with all attached
 
-**Skattekonto/** → `$FORTNOX_SKATTEKONTO`
+**Skattekonto** → `$FORTNOX_SKATTEKONTO`
 - From state.md: all rows where `type = skattekonto` and `fortnox_sent = no`
-- Method: download file from Drive and send as attachment
+- Method: download all PDFs from Drive, send as ONE email with all attached
 
-**Kundfakturor/** → `$FORTNOX_KUNDFAKTURA`
-- List all files in `YYYY-MM/Kundfakturor/` in Drive directly (not tracked in state.md)
-- Method: download each file from Drive and send as attachment
+**Kundfakturor** → `$FORTNOX_KUNDFAKTURA`
+- Find the `Kundfakturor/` folder in Drive under the month folder and assign its ID to `KUNDFAKTURA_FOLDER_ID`. If the folder does not exist, treat this type as "no documents this month" and skip it (do not error).
+- List all files in the folder. If the folder is empty, skip this type.
+- Method: download all PDFs from Drive, send as ONE email with all attached
 
 ## Step 6 — Dry Run Output
 
@@ -70,59 +71,70 @@ If `DRY_RUN=true`, print the full routing plan and stop:
 DRY RUN — Month Close 2026-03
 No drafts will be created.
 
-Would send:
-  → FORTNOX_VERIFIKATION
-    [forward] Supplier A — receipt-a.pdf (msg_id: abc123)
-    [forward] Supplier B — receipt-b.pdf (msg_id: def456)
+Would send (1 email per type):
+  → FORTNOX_VERIFIKATION  (1 email, 2 attachments)
+    Supplier A — receipt-a.pdf
+    Supplier B — receipt-b.pdf
 
-  → FORTNOX_LEVERANTORSFAKTURA
-    [forward] Supplier C — invoice-c.pdf (msg_id: ghi789)
-    [attachment] Supplier D — invoice-d.pdf (no Gmail msg_id — downloaded from Drive)
+  → FORTNOX_LEVERANTORSFAKTURA  (1 email, 2 attachments)
+    Supplier C — invoice-c.pdf
+    Supplier D — invoice-d.pdf
 
   → FORTNOX_SKATTEKONTO  skipped — FORTNOX_EMAIL_SKATTEKONTO not configured
 
-  → FORTNOX_KUNDFAKTURA
-    [attachment] client-invoice-2026-03.pdf (downloaded from Drive)
+  → FORTNOX_KUNDFAKTURA  (1 email, 1 attachment)
+    client-invoice-2026-03.pdf
 
 No drafts will be created. Re-run without --dry-run to create them.
 ```
 
 ## Step 7 — Execute (non-dry-run only)
 
-For each document in the routing plan:
+For each document type in the routing plan, create ONE email with all documents of that type as attachments.
 
-**Forward method** (original Gmail message_id available):
+**Resolve the type folder ID** before downloading. Use a Drive files list query to find the subfolder by name under the month folder (e.g. `Verifikationer`, `Leverantörsfakturor`, `Skattekonto`). Assign the result to `TYPE_FOLDER_ID`. For Kundfakturor, use `$KUNDFAKTURA_FOLDER_ID` resolved in Step 5 — do not re-query.
 
-Create a draft that forwards the original message:
+**For each document in the type group — download from Drive:**
+
+Use `drive_file_id` from the Documents table if the value is non-empty and not equal to `upload-failed`. If it is blank or `upload-failed`, fall back to a name lookup using `TYPE_FOLDER_ID`:
 ```bash
-gws gmail +draft-forward --message-id <message_id> --to <fortnox_email>
+gws drive files list --params '{"q": "name='\''<filename>'\'' and '\''<TYPE_FOLDER_ID>'\'' in parents and trashed=false"}' --format json | jq -r '.files[0].id'
 ```
 
-**Attachment method** (no Gmail message_id — Skattekonto, Kundfakturor, or locally scanned docs):
+If the name lookup also returns no results (the file was never uploaded), skip this document, log it as a failure with the message "File not in Drive — manual upload required", and continue with the next document.
 
-Download the file from Drive to local staging first:
+Download to local staging:
 ```bash
 gws drive files get --params '{"fileId": "<file_id>", "alt": "media"}' -o "$STAGING_DIR/$MONTH/<filename>"
 ```
 
-Then create a draft with the file attached:
+**Create ONE draft per type with all files attached:**
+
 ```bash
 gws gmail +draft \
   --to <fortnox_email> \
-  --subject "<type>: <supplier> <amount> <currency> — <YYYY-MM>" \
-  --body "Bifogad fil: <filename>" \
-  --attachment "$STAGING_DIR/$MONTH/<filename>"
+  --subject "Nilsark Consulting AB <type-label> $MONTH" \
+  --body "Bifogade filer: <comma-separated list of filenames>" \
+  --attachment "$STAGING_DIR/$MONTH/file1.pdf" \
+  --attachment "$STAGING_DIR/$MONTH/file2.pdf" \
+  ...
 ```
 
-After each draft is successfully created:
-- Update `fortnox_sent = yes` for that document in the Documents table
-- Add it to the draft log
+Subject type-labels:
+- Verifikationer: `kvitton`
+- Leverantörsfakturor: `leverantörsfakturor`
+- Skattekonto: `skattekonto`
+- Kundfakturor: `kundfakturor`
 
-If a draft creation fails: log the failure, continue with the next document. Do not mark as sent.
+On success: update `fortnox_sent = yes` only for the documents that were successfully downloaded and included in the draft (i.e. not skipped due to missing Drive file). Documents that were skipped with "File not in Drive" retain `fortnox_sent = no` so they appear in future re-runs after manual upload.
+
+On failure: log the failure, mark none as sent for this type. Do not attempt partial sends.
 
 ## Step 8 — Update Month Summary
 
-If all drafts were created (or at least all were attempted):
+Only update the month summary if **all** draft creations succeeded (no failures logged). Skipped types (empty folder, unconfigured email, or no `fortnox_sent = no` documents remaining) do not count as failures. If any type failed, leave `Month-close sent: no` so the command can be retried — documents already marked `fortnox_sent = yes` will be skipped on re-run (the routing plan in Step 5 filters them out).
+
+If all non-skipped types succeeded:
 ```
 Month-close sent: yes
 Month-close date: YYYY-MM-DD
@@ -138,12 +150,15 @@ Upload the final state.md back to Drive (see `nilsark:accounting-state` skill fo
 Month Close Complete — 2026-03
 
 Drafts created:
-  ✓ Verifikationer: 2 drafts  → FORTNOX_VERIFIKATION
-  ✓ Leverantörsfakturor: 2 drafts  → FORTNOX_LEVERANTORSFAKTURA
+  ✓ Verifikationer: 1 draft (2 attachments)  → FORTNOX_VERIFIKATION
+  ✓ Leverantörsfakturor: 1 draft (2 attachments)  → FORTNOX_LEVERANTORSFAKTURA
   - Skattekonto: skipped — FORTNOX_EMAIL_SKATTEKONTO not configured
-  ✓ Kundfakturor: 1 draft  → FORTNOX_KUNDFAKTURA
+  ✓ Kundfakturor: 1 draft (1 attachment)  → FORTNOX_KUNDFAKTURA
 
 Failures:
+  None
+
+Missing files (manual upload required):
   None
 
 Drafts are ready in Gmail — review and send manually.
@@ -151,3 +166,5 @@ state.md updated. Month 2026-03 is closed.
 ```
 
 If there were any failures, list them explicitly and remind the user to retry manually.
+
+If any documents were skipped due to missing Drive file, list them under "Missing files (manual upload required)" and instruct the user to upload the file to the correct Drive subfolder and re-run `/month-close`.
