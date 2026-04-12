@@ -43,7 +43,7 @@ mkdir -p "$STAGING_DIR/.state"
 
 **Important:** Always run the Drive queries below fresh — never reuse folder IDs or file IDs from a previous conversation turn or prior run.
 
-> **Auth guard:** If any `gws` command below exits with a non-zero code and its output contains "auth", "token", "unauthenticated", "unauthorized", or "login", stop immediately and run `/nilsark:gws-auth`. After the user completes auth, retry from this step.
+> **Auth guard:** If any `gws` command in this command exits with a non-zero code and its output contains "auth", "token", "unauthenticated", "unauthorized", or "login", stop immediately and run `/nilsark:gws-auth`. After the user completes auth, retry from this step. This guard applies to all gws calls in all subsequent steps, not just Step 4.
 
 Find the month folder in Drive:
 ```bash
@@ -55,20 +55,30 @@ If the month folder does not exist yet, create it:
 gws drive files create --json '{"name": "'"$MONTH"'", "mimeType": "application/vnd.google-apps.folder", "parents": ["'"$DRIVE_ROOT_FOLDER_ID"'"]}'
 ```
 
-Find or create the `.nilsark` subfolder within the month folder:
+Find or create the `.nilsark` subfolder within the month folder. Assign to `NILSARK_FOLDER_ID`:
 ```bash
-gws drive files list --params '{"q": "name='\''.nilsark'\'' and '\''<MONTH_FOLDER_ID>'\'' in parents and mimeType='\''application/vnd.google-apps.folder'\'' and trashed=false"}' --format json
-# If not found:
-gws drive files create --json '{"name": ".nilsark", "mimeType": "application/vnd.google-apps.folder", "parents": ["<MONTH_FOLDER_ID>"]}'
+NILSARK_LIST=$(gws drive files list --params '{"q": "name='\''.nilsark'\'' and '\''<MONTH_FOLDER_ID>'\'' in parents and mimeType='\''application/vnd.google-apps.folder'\'' and trashed=false"}' --format json)
+NILSARK_FOLDER_ID=$(echo "$NILSARK_LIST" | jq -r '.files[0].id // empty')
+# If not found (list succeeded but NILSARK_FOLDER_ID is empty), create it:
+if [ -z "$NILSARK_FOLDER_ID" ]; then
+  NILSARK_FOLDER_ID=$(gws drive files create --json '{"name": ".nilsark", "mimeType": "application/vnd.google-apps.folder", "parents": ["<MONTH_FOLDER_ID>"]}' --format json | jq -r '.id')
+fi
 ```
 
-Find and download state.md from the `.nilsark` folder. Capture the file ID — you will need it for the upload step:
+Find state.md in the `.nilsark` folder and capture its file ID:
 ```bash
-STATE_FILE_ID=$(gws drive files list --params '{"q": "name='\''state.md'\'' and '\''<NILSARK_FOLDER_ID>'\'' in parents and trashed=false"}' --format json | jq -r '.files[0].id // empty')
+STATE_LIST=$(gws drive files list --params '{"q": "name='\''state.md'\'' and '\''<NILSARK_FOLDER_ID>'\'' in parents and trashed=false"}' --format json)
+STATE_FILE_ID=$(echo "$STATE_LIST" | jq -r '.files[0].id // empty')
+```
+
+If the `files list` command itself fails (non-zero exit, or output is not valid JSON), stop immediately — do not fall through to template creation, as this indicates an auth or network error, not a genuine first run.
+
+If `$STATE_FILE_ID` is non-empty, download it:
+```bash
 cd "$STAGING_DIR/.state" && gws drive files get --params '{"fileId": "'$STATE_FILE_ID'", "alt": "media"}' -o "$MONTH-state.md"
 ```
 
-If state.md does not exist yet, create it from the template defined in the `nilsark:accounting-state` skill (see First Run section).
+If `$STATE_FILE_ID` is empty (state.md not found in Drive — genuine first run), create it from the template defined in the `nilsark:accounting-state` skill (see First Run section). Do not issue a `files get` with an empty ID.
 
 ## Step 5 — Parse Existing Message IDs
 
@@ -88,7 +98,7 @@ Initialize an empty list: `NEWLY_DOWNLOADED=()`.
 
 For each message ID returned:
 
-**a) Check deduplication:** If this message_id exists in state.md with status other than `error`, skip it and increment the skipped counter.
+**a) Check deduplication:** If this message_id exists in state.md AND **all** rows for this message_id have status `classified`, skip it and increment the skipped counter. If any row has status `downloaded` or `error`, process the message again — `downloaded` means the attachment was fetched but classification was never completed. (Rows with status `skipped — covered by companion receipt` count as classified for deduplication purposes.)
 
 **b) Get message metadata:**
 ```bash
@@ -111,12 +121,26 @@ gws gmail users messages attachments get \
 
 Use the original filename from the message. If two files have the same name, append the message_id as suffix. Add each successfully downloaded filename to `NEWLY_DOWNLOADED`.
 
-**d) Update state.md:** Append a row to the Processed Gmail Messages table:
+**d) Update state.md:** Write a row to the Processed Gmail Messages table. If a row for this exact (message_id, filename) combination already exists, update it in-place. If no such row exists, append a new one:
 ```
 | <message_id> | <date> | <from> | <subject> | <filename> | downloaded |
 ```
 
-If any step (b, c) fails, append the row with status `error` and continue to the next message. Do not abort.
+If any step (b, c) fails, write (or update) the row with status `error` and continue to the next message. Do not abort.
+
+## Step 7b — Persist Download Progress
+
+Upload the current state.md to Drive immediately after the download loop, before classification begins. This ensures deduplication rows are persisted even if classification fails later.
+
+- If `$STATE_FILE_ID` is set (normal case): use `gws drive files update`
+- If `$STATE_FILE_ID` is empty (first run):
+  ```bash
+  UPLOAD_RESULT=$(cd "$STAGING_DIR/.state" && gws drive +upload "$MONTH-state.md" --parent "$NILSARK_FOLDER_ID" --name state.md --format json)
+  UPLOAD_EXIT=$?
+  STATE_FILE_ID=$(echo "$UPLOAD_RESULT" | jq -r '.id // empty')
+  ```
+
+Capture `UPLOAD_EXIT=$?` (shown above for first run; for `files update` in the normal case, capture the exit code the same way). If non-zero, stop and report the error — do not proceed to classification with unpersisted state.
 
 ## Step 8 — Classify New Files
 
@@ -127,6 +151,8 @@ For each filename in `NEWLY_DOWNLOADED`: skip it if it is already present in the
 **b) Check for companion receipt (invoice+receipt pairs).**
 
 Look up this file's message_id by finding its row in the Processed Gmail Messages table (match by filename). If that same message_id produced multiple attachments and another is already in the Documents table as `kvitto`, update this row's status to `skipped — covered by companion receipt`, skip steps c–g, and continue to the next file. Do not upload to Drive.
+
+Note: this check is one-directional — it fires only when the kvitto was processed before the invoice. If the invoice appears first in `NEWLY_DOWNLOADED`, the invoice is classified normally; the companion kvitto is then also classified normally when its turn comes. Both end up in state.md in their respective folders, which is correct behavior.
 
 **c) Classify** by reading `swedish-invoice-tools/skills/classify-invoice.md` and applying its decision tree to the document. Do not classify from your own reasoning — follow the skill's rules explicitly.
 
@@ -154,16 +180,22 @@ gws drive files list --params '{"q": "name='\''Leverantörsfakturor'\'' and '\''
 gws drive files list --params '{"q": "name='\''Skattekonto'\'' and '\''<MONTH_FOLDER_ID>'\'' in parents and mimeType='\''application/vnd.google-apps.folder'\'' and trashed=false"}' --format json
 ```
 
-**f) Upload to Drive:**
+**f) Upload to Drive and capture file ID:**
 ```bash
-gws drive +upload "$STAGING_DIR/$MONTH/<filename>" --parent <TARGET_FOLDER_ID>
+UPLOAD_RESULT=$(gws drive +upload "$STAGING_DIR/$MONTH/<filename>" --parent <TARGET_FOLDER_ID> --format json)
+UPLOAD_EXIT=$?
+DRIVE_FILE_ID=$(echo "$UPLOAD_RESULT" | jq -r '.id // empty')
 ```
+
+If `$UPLOAD_EXIT` is non-zero (upload failed): log `drive_file_id = upload-failed` in the Documents table, set `payment_status` as normal, and include this file in the Step 11 summary under a "Upload errors (manual re-upload needed)" section. Do not abort — continue to the next file.
+
+If `$UPLOAD_EXIT` is zero but `$DRIVE_FILE_ID` is empty (unexpected): leave `drive_file_id` blank — month-close will fall back to a Drive files list lookup.
 
 Record the Drive path (e.g. `2026-03/Verifikationer/<filename>`).
 
 **g) Append row to Documents table** in state.md:
 ```
-| <filename> | <type> | <supplier> | <amount> | <currency> | <due_date> | <ocr_number> | <bank_account> | <vat_amount> | <drive_path> | <payment_status> | no |
+| <filename> | <type> | <supplier> | <amount> | <currency> | <due_date> | <ocr_number> | <bank_account> | <vat_amount> | <drive_path> | <drive_file_id> | <payment_status> | no |
 ```
 
 Set `payment_status`:
@@ -190,16 +222,11 @@ Recount all rows and update the Month Summary section:
 
 ## Step 10 — Upload state.md
 
-Upload the modified state.md back to Drive: — update in-place if the file already exists, otherwise create:
-- If `$STATE_FILE_ID` is set (normal case):
-  ```bash
-  gws drive files update --params '{"fileId": "'$STATE_FILE_ID'"}' \
-    --upload "$STAGING_DIR/.state/$MONTH-state.md" --upload-content-type text/markdown
-  ```
-- If `$STATE_FILE_ID` is empty (first run — no state.md in Drive yet):
-  ```bash
-  cd "$STAGING_DIR/.state" && gws drive +upload "$MONTH-state.md" --parent <NILSARK_FOLDER_ID> --name state.md
-  ```
+Upload the modified state.md back to Drive. By this point `$STATE_FILE_ID` is always set — Step 7b ensures it is populated even on a first run. Always use the update path:
+```bash
+gws drive files update --params '{"fileId": "'$STATE_FILE_ID'"}' \
+  --upload "$STAGING_DIR/.state/$MONTH-state.md" --upload-content-type text/markdown
+```
 
 ## Step 11 — Print Summary
 
@@ -211,7 +238,7 @@ Fetch + classify complete for 2026-03:
   Classified — kvitton: B
   Classified — skattekonto: C
   Unknown (manual review needed): U
-  Errors: E (check state.md for details)
+  Download/classification errors: E (check state.md for details)
 
 Files saved to: $STAGING_DIR/2026-03/
 ```
@@ -220,4 +247,10 @@ If U > 0, list the unknown files and the reason classification was uncertain:
 ```
 Documents needing review:
   - <filename>: <reason>
+```
+
+If any Drive uploads failed (Step 8f), add:
+```
+Upload errors (manual re-upload needed): F
+  - <filename>: upload failed — file is at $STAGING_DIR/2026-03/<filename>, re-upload to Drive manually
 ```
