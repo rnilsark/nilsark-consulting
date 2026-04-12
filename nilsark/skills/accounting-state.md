@@ -76,7 +76,9 @@ State.md uses markdown tables. Parse each row by:
 Before downloading a Gmail attachment, check the Processed Gmail Messages table:
 ```
 If message_id exists in the table AND ALL rows for that message_id have status = 'classified'
-  OR status = 'skipped — covered by companion receipt' → skip this message (fully processed)
+  OR status = 'skipped — covered by companion receipt'
+  OR status = 'skipped — future month'
+  → skip this message (fully processed)
 If any row has status 'downloaded' or 'error' → re-process (classification was never completed)
 ```
 
@@ -86,7 +88,7 @@ To add a new row to a table, append it after the last data row (before the next 
 
 Example — appending to Documents table:
 ```markdown
-| faktura-telia-2026-03.pdf | leverantörsfaktura | Telia Sverige AB | 1250.00 | SEK | 2026-04-15 | 1234567890 | BG 123456-7 | 250.00 | 2026-03/Leverantörsfakturor/faktura-telia-2026-03.pdf | 1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74 | unpaid | no |
+| faktura-telia-2026-03.pdf | leverantörsfaktura | Telia Sverige AB | 1250.00 | SEK | 2026-04-15 | 2026-03-10 | 1234567890 | BG 123456-7 | 250.00 | 2026-03/Leverantörsfakturor/faktura-telia-2026-03.pdf | 1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74 | unpaid | no |
 ```
 
 ## Updating Existing Rows
