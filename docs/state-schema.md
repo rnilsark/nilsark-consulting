@@ -19,8 +19,8 @@ This file is the single source of truth for all processing status. Every command
 |------------|------|------|---------|-------------------|--------|
 
 ## Documents
-| file | type | supplier | amount | currency | due_date | ocr_number | bank_account | vat_amount | drive_path | drive_file_id | payment_status | fortnox_sent |
-|------|------|---------|--------|----------|---------|-----------|-------------|-----------|-----------|--------------|---------------|-------------|
+| file | type | supplier | amount | currency | due_date | document_date | ocr_number | bank_account | vat_amount | drive_path | drive_file_id | payment_status | fortnox_sent |
+|------|------|---------|--------|----------|---------|--------------|-----------|-------------|-----------|-----------|--------------|---------------|-------------|
 
 ## Bank Statement Transactions
 | date | description | amount | currency | matched_to_file | match_confidence |
@@ -41,7 +41,7 @@ This file is the single source of truth for all processing status. Every command
 
 ## Table: Processed Gmail Messages
 
-**Purpose:** Deduplication. Before downloading any attachment, the fetch command checks this table. If all rows for a `message_id` have status `classified` or `skipped — covered by companion receipt`, the message is skipped (fully processed). If any row has status `downloaded` or `error`, the message is re-processed — `downloaded` means an attachment was fetched but classification never completed.
+**Purpose:** Deduplication. Before downloading any attachment, the fetch command checks this table. If all rows for a `message_id` have status `classified`, `skipped — covered by companion receipt`, or `skipped — future month`, the message is skipped (fully processed). If any row has status `downloaded` or `error`, the message is re-processed — `downloaded` means an attachment was fetched but classification never completed.
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -57,6 +57,7 @@ This file is the single source of truth for all processing status. Every command
 - `classified` — fetch-classify has successfully classified and uploaded this file
 - `error` — download or processing failed; will be retried on next run
 - `skipped — covered by companion receipt` — invoice suppressed because a matching kvitto from the same message was already classified; treated as fully processed for deduplication (a message_id with only this status is skipped on re-run)
+- `skipped — future month` — document_date is after `$MONTH`; belongs to a later month, will be picked up by that month's `/fetch-classify` run
 
 ---
 
@@ -72,6 +73,7 @@ This file is the single source of truth for all processing status. Every command
 | `amount` | decimal | Total amount including VAT |
 | `currency` | string | Currency code (almost always `SEK`) |
 | `due_date` | ISO 8601 date | Förfallodatum — leverantörsfaktura only, blank for kvitto |
+| `document_date` | ISO 8601 date | Document's own date (invoice date, receipt/transaction date, statement date). Blank if unreadable. Used by fetch-classify to route the document to the correct month. Distinct from `due_date` (Förfallodatum). |
 | `ocr_number` | string | OCR-nummer for bank payment — leverantörsfaktura only |
 | `bank_account` | string | Bankgiro (XXXXXX-X) or plusgiro (XXXXX-X) |
 | `vat_amount` | decimal | Moms in SEK |
