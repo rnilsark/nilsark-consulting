@@ -34,7 +34,7 @@ TODAY=$(date +%Y-%m-%d)
 ## Step 5 — Filter Unpaid Invoices
 
 From the Documents table, select all rows where:
-- `type = leverantorsfaktura`
+- `type = leverantörsfaktura`
 - `payment_status` is `unpaid` or `overdue`
 
 For each selected row:
