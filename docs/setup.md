@@ -89,11 +89,14 @@ mkdir -p ~/Desktop/nilsark-staging
 # Set: STAGING_DIR=/home/YourName/Desktop/nilsark-staging
 ```
 
-Or put it on your Windows Desktop (accessible from both WSL2 and Windows Explorer):
+Or put it somewhere under your Windows user profile (accessible from both WSL2 and Windows Explorer):
 ```bash
-mkdir -p /mnt/c/Users/YourWindowsName/Desktop/nilsark-staging
-# Set: STAGING_DIR=/mnt/c/Users/YourWindowsName/Desktop/nilsark-staging
+mkdir -p /mnt/c/Users/YourWindowsName/.nilsark
+mkdir -p /mnt/c/Users/YourWindowsName/.nilsark/drop
+# Set: STAGING_DIR=/mnt/c/Users/YourWindowsName/.nilsark
 ```
+
+The `drop/` subfolder is your receipt inbox — drag PDFs and images here and they will be picked up automatically on the next `/fetch-classify` run.
 
 ---
 
