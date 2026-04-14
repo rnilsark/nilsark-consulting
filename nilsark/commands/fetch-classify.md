@@ -41,6 +41,7 @@ FUTURE_MONTH_SKIP_COUNT=0
 ```bash
 mkdir -p "$STAGING_DIR/$MONTH"
 mkdir -p "$STAGING_DIR/.state"
+mkdir -p "$STAGING_DIR/drop"
 ```
 
 ## Step 4 — Download or Initialize state.md
@@ -146,6 +147,35 @@ Upload the current state.md to Drive immediately after the download loop, before
 
 Capture `UPLOAD_EXIT=$?` (shown above for first run; for `files update` in the normal case, capture the exit code the same way). If non-zero, stop and report the error — do not proceed to classification with unpersisted state.
 
+## Step 7c — Pick Up Drop Folder Files
+
+Initialize `DROP_FILES=()` to track which files in `NEWLY_DOWNLOADED` came from the drop folder.
+
+Check whether `$STAGING_DIR/drop/` contains any files (non-hidden regular files only):
+```bash
+shopt -s nullglob
+drop_files=("$STAGING_DIR/drop"/*)
+shopt -u nullglob
+```
+
+For each file found:
+
+**a) Dedup check:** If a row with this filename already exists in the Documents table in `$MONTH-state.md`, skip it — already classified and uploaded.
+
+**b) Collision check:** If a file with the same name already exists in `$STAGING_DIR/$MONTH/`, rename the incoming file by appending `_drop` before the extension (e.g. `faktura.pdf` → `faktura_drop.pdf`).
+
+**c) Move** the file into the month staging directory:
+```bash
+mv "$STAGING_DIR/drop/<filename>" "$STAGING_DIR/$MONTH/<filename>"
+```
+
+**d)** Add `<filename>` to both `NEWLY_DOWNLOADED` and `DROP_FILES`.
+
+If any files were moved, print:
+```
+Drop folder: N file(s) added to this run.
+```
+
 ## Step 8 — Classify New Files
 
 For each filename in `NEWLY_DOWNLOADED`: skip it if it is already present in the Documents table (matched by filename). If no files remain after this check, skip to Step 9.
@@ -154,7 +184,9 @@ For each filename in `NEWLY_DOWNLOADED`: skip it if it is already present in the
 
 **b) Check for companion receipt (invoice+receipt pairs).**
 
-Look up this file's message_id by finding its row in the Processed Gmail Messages table (match by filename). If that same message_id produced multiple attachments and another is already in the Documents table as `kvitto`, update this row's status to `skipped — covered by companion receipt`, skip steps c–g, and continue to the next file. Do not upload to Drive.
+Skip this check entirely if the file is in `DROP_FILES` — drop-folder files have no email, so there is no companion receipt concept.
+
+For Gmail files: look up this file's message_id by finding its row in the Processed Gmail Messages table (match by filename). If that same message_id produced multiple attachments and another is already in the Documents table as `kvitto`, update this row's status to `skipped — covered by companion receipt`, skip steps c–g, and continue to the next file. Do not upload to Drive.
 
 Note: this check is one-directional — it fires only when the kvitto was processed before the invoice. If the invoice appears first in `NEWLY_DOWNLOADED`, the invoice is classified normally; the companion kvitto is then also classified normally when its turn comes. Both end up in state.md in their respective folders, which is correct behavior.
 
@@ -187,7 +219,9 @@ Else:
     DOC_MONTH = $MONTH  (fall back — treat as current month)
 ```
 
-- **DOC_MONTH > MONTH (future-dated)**: do NOT upload or add a Documents row. Update the Processed Gmail Messages row for this (message_id, filename) to `skipped — future month`. Increment `FUTURE_MONTH_SKIP_COUNT`. Continue to next file.
+- **DOC_MONTH > MONTH (future-dated)**: do NOT upload or add a Documents row. Increment `FUTURE_MONTH_SKIP_COUNT`. Continue to next file.
+  - For Gmail files: update the Processed Gmail Messages row for this (message_id, filename) to `skipped — future month`.
+  - For drop-folder files: move the file back to `$STAGING_DIR/drop/<filename>` — it will be picked up by the month's run when that month arrives. No state.md entry.
 - **DOC_MONTH ≤ MONTH**: file in `$MONTH` regardless of how old the document_date is. Late-arriving receipts and lagged paper scans are normal — always file them in the current run's month.
 
 **e) Determine Drive target folder:**
@@ -242,7 +276,9 @@ Set `payment_status`:
 - `n/a` for kundfaktura (it is income, not an outgoing payment)
 - `n/a` for unknown documents (leave all financial fields blank)
 
-Update the matching row in `$MONTH-state.md` Processed Gmail Messages table (match by message_id from step b): if the current status is `downloaded`, change it to `classified`. Skip the update entirely for rows with status `error`.
+For Gmail files: update the matching row in `$MONTH-state.md` Processed Gmail Messages table (match by message_id from step b): if the current status is `downloaded`, change it to `classified`. Skip the update entirely for rows with status `error`.
+
+For drop-folder files: do NOT write to the Processed Gmail Messages table. The Documents table row is the only state record needed.
 
 ## Step 9 — Update Month Summary
 
@@ -274,6 +310,7 @@ gws drive files update --params '{"fileId": "'$STATE_FILE_ID'"}' \
 Fetch + classify complete for 2026-03:
   New messages fetched: N  (M attachments)
   Messages skipped (already processed): K
+  Drop folder files picked up: D
   Skipped — future month (picked up by later run): F
   Classified — leverantörsfakturor: A
   Classified — kundfakturor: D
@@ -284,6 +321,8 @@ Fetch + classify complete for 2026-03:
 
 Files saved to: $STAGING_DIR/2026-03/
 ```
+
+Omit the `Drop folder files picked up` line if `DROP_FILES` is empty.
 
 If U > 0, list the unknown files and the reason classification was uncertain:
 ```
