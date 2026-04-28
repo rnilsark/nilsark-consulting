@@ -1,0 +1,23 @@
+developer/skills/plan-fast.md
+  7c3641b7bd7ed02d 1-109
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "9212b2aa2715df5bef08df06b052150c37eedbaf",
+  "prompts": {
+    "7c3641b7bd7ed02d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "05ba743b-aaf1-49b9-9f9f-57be5927a2bc",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Richard Nilsark",
+      "messages": [],
+      "total_additions": 121,
+      "total_deletions": 2,
+      "accepted_lines": 109,
+      "overriden_lines": 0
+    }
+  }
+}
