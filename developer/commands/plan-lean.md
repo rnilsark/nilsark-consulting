@@ -1,5 +1,5 @@
 ---
-name: plan-fast
+name: plan-lean
 description: Write a short, scannable implementation plan a human can read in under a minute. Thin wrapper around the writing-lean-plans skill.
 ---
 
