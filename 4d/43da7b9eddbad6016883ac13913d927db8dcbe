@@ -1,0 +1,23 @@
+developer/commands/plan-lean.md
+  84a43f5eabcbab01 2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "4d43da7b9eddbad6016883ac13913d927db8dcbe",
+  "prompts": {
+    "84a43f5eabcbab01": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f0b02d77-0383-488e-ac56-8287ffb3cca1",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Richard Nilsark",
+      "messages": [],
+      "total_additions": 8,
+      "total_deletions": 2,
+      "accepted_lines": 399,
+      "overriden_lines": 0
+    }
+  }
+}
