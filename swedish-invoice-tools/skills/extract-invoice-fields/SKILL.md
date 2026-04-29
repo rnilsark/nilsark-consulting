@@ -1,4 +1,5 @@
 ---
+name: extract-invoice-fields
 description: Extract structured accounting fields from a Swedish leverantörsfaktura or kvitto. Use this skill after classifying a document to get the data needed for bookkeeping.
 ---
 

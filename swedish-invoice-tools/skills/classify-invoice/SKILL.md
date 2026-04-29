@@ -1,4 +1,5 @@
 ---
+name: classify-invoice
 description: Classify a Swedish PDF document as a leverantörsfaktura (supplier invoice), kvitto (receipt), skattekonto (tax payment), or unknown. Use this skill when reading any Swedish accounting document that needs to be categorized.
 ---
 
