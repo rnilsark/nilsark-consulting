@@ -1,4 +1,5 @@
 ---
+name: match-bank-transactions
 description: Match Swedish bank statement transactions (SEB or Handelsbanken CSV export) against a list of invoices. Use this skill to identify which invoices have been paid and which transactions are unaccounted for.
 ---
 

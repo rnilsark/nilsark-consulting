@@ -1,7 +1,7 @@
 {
   "name": "developer",
-  "version": "1.0.0",
-  "description": "Developer skills and workflows. Includes general tooling (parallel code review) and C#-specific cleanup (remove-ai-slop). Not all skills are portable across all client engagements — check individual skill descriptions.",
+  "version": "1.1.0",
+  "description": "Developer skills, agents, and commands by NILSARK CONSULTING AB. Mix of general tooling and engagement-specific helpers — check individual skill descriptions for portability.",
   "author": {"name": "NILSARK CONSULTING AB"},
   "license": "MIT"
 }

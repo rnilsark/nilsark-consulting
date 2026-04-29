@@ -1,4 +1,5 @@
 ---
+name: accounting-state
 description: Read and update a monthly accounting state.md file stored in Google Drive. Use this skill whenever a command needs to read processing status, check deduplication, or update document metadata.
 ---
 

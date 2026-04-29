@@ -1,9 +1,9 @@
 ---
-name: plan-fast
+name: writing-lean-plans
 description: Write a short, scannable implementation plan a human can read in under a minute. Use when the user wants a quick plan, a sketch, or an outline — not a full TDD walkthrough. Prefer this for small tasks, refactors, bug fixes, or when the user says "quick plan", "rough plan", "outline", or "just sketch it".
 ---
 
-# Plan Fast
+# Writing Lean Plans
 
 A fast plan is a punch list, not a tutorial. The reader is a competent engineer who needs to know **what** and **where**, not **how** to write code.
 
