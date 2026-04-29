@@ -1,0 +1,23 @@
+developer/skills/plan-lean.md
+  7c3641b7bd7ed02d 2-3,6,8,12,17,109
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "907f409ff15daeb17cbfb7867ac29719f8a0e7ca",
+  "prompts": {
+    "7c3641b7bd7ed02d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "05ba743b-aaf1-49b9-9f9f-57be5927a2bc",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Richard Nilsark",
+      "messages": [],
+      "total_additions": 123,
+      "total_deletions": 14,
+      "accepted_lines": 116,
+      "overriden_lines": 0
+    }
+  }
+}
