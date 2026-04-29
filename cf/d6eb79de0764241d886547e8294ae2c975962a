@@ -1,0 +1,39 @@
+developer/commands/plan-fast.md
+  84a43f5eabcbab01 1-6
+nilsark/.claude-plugin/plugin.json
+  84a43f5eabcbab01 3
+nilsark/skills/accounting-state/SKILL.md
+  84a43f5eabcbab01 1-109
+swedish-invoice-tools/skills/classify-invoice/SKILL.md
+  84a43f5eabcbab01 1-58
+swedish-invoice-tools/skills/match-bank-transactions/SKILL.md
+  84a43f5eabcbab01 1-61
+swedish-invoice-tools/skills/extract-invoice-fields/SKILL.md
+  84a43f5eabcbab01 1-55
+developer/.claude-plugin/plugin.json
+  84a43f5eabcbab01 3-4
+swedish-invoice-tools/.claude-plugin/plugin.json
+  84a43f5eabcbab01 3
+developer/skills/writing-lean-plans/SKILL.md
+  84a43f5eabcbab01 1-109
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "cfd6eb79de0764241d886547e8294ae2c975962a",
+  "prompts": {
+    "84a43f5eabcbab01": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f0b02d77-0383-488e-ac56-8287ffb3cca1",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Richard Nilsark",
+      "messages": [],
+      "total_additions": 513,
+      "total_deletions": 6,
+      "accepted_lines": 402,
+      "overriden_lines": 0
+    }
+  }
+}
