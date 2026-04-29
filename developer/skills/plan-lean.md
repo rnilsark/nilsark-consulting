@@ -1,20 +1,20 @@
 ---
-name: plan-fast
-description: Write a short, scannable implementation plan a human can read in under a minute. Use when the user wants a quick plan, a sketch, or an outline — not a full TDD walkthrough. Prefer this for small tasks, refactors, bug fixes, or when the user says "quick plan", "rough plan", "outline", or "just sketch it".
+name: plan-lean
+description: Write a short, scannable implementation plan a human can read in under a minute. Use when the user wants a lean plan, a sketch, or an outline — not a full TDD walkthrough. Prefer this for small tasks, refactors, bug fixes, or when the user says "lean plan", "quick plan", "rough plan", "outline", or "just sketch it".
 ---
 
-# Plan Fast
+# Plan Lean
 
-A fast plan is a punch list, not a tutorial. The reader is a competent engineer who needs to know **what** and **where**, not **how** to write code.
+A lean plan is a punch list, not a tutorial. The reader is a competent engineer who needs to know **what** and **where**, not **how** to write code.
 
 ## Same rigor, crisper output
 
-**"Fast" describes the reader's experience, not yours.** Do the full investigation. Read the files, trace the call sites, check the schema, verify the symbol names exist. The plan is short because you cut filler words — not because you cut thinking.
+**"Lean" describes the reader's experience, not yours.** Do the full investigation. Read the files, trace the call sites, check the schema, verify the symbol names exist. The plan is short because you cut filler words — not because you cut thinking.
 
 - Spend the same time reading code as you would for a long plan
 - Verify every file path and symbol you name (a wrong path is worse than no path)
 - Check edge cases, migrations, and side effects before writing the steps
-- If you'd grep five files for a long plan, grep five files for a fast plan
+- If you'd grep five files for a long plan, grep five files for a lean plan
 - If something is uncertain, say so in one line — don't paper over it with confident-sounding bullets
 
 A crisp plan with wrong details is worse than a verbose plan with right ones. Brevity is the last step, not the first.
@@ -106,4 +106,4 @@ A reader scans this in 20 seconds and starts work.
 - Code blocks reproducing the file you're editing
 - "Testing" sections that just say "add tests"
 - Numbered lists where every item starts with "Make sure that…"
-- Skipping the file/symbol verification step because "it's just a fast plan"
+- Skipping the file/symbol verification step because "it's just a lean plan"
