@@ -11,21 +11,18 @@
       "name": "swedish-invoice-tools",
       "description": "Skills for classifying and processing Swedish AB accounting documents",
       "source": "./swedish-invoice-tools",
-      "version": "1.0.0",
       "license": "MIT"
     },
     {
       "name": "nilsark",
       "description": "Monthly accounting workflow commands for NILSARK CONSULTING AB",
       "source": "./nilsark",
-      "version": "1.0.0",
       "license": "MIT"
     },
     {
       "name": "developer",
       "description": "General-purpose developer skills for use across all client engagements",
       "source": "./developer",
-      "version": "1.0.0",
       "license": "MIT"
     }
   ]
