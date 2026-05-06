@@ -19,15 +19,19 @@ DRIVE_ROOT_FOLDER_ID=$(grep '^DRIVE_ROOT_FOLDER_ID=' ~/.nilsark-config.md | cut 
 
 Use argument if provided, otherwise `date +%Y-%m`.
 
-## Step 3 — Find the Bank Statement CSV
+## Step 3 — Find the Bank Statement CSV(s)
 
 First check local staging:
 ```bash
 ls "$STAGING_DIR/$MONTH/"*.csv 2>/dev/null
 ```
 
-- If exactly one CSV is found locally: use it. Skip the Drive check entirely.
-- If multiple CSVs are found locally: list them and ask the user which one to use before continuing.
+Handelsbanken exports two CSV types that must be used together:
+- **Type A** (account transactions): contains the full list of movements including aggregate `INTERNET BET` rows
+- **Type B** (Internet-payment details): one file per payment date, contains the individual payees behind each `INTERNET BET` row
+
+If all found CSVs are from Handelsbanken (detected by header), collect all of them — do not ask the user to pick one.
+- If one or more CSVs are found locally: use all of them. Skip the Drive check entirely.
 - If no CSV found locally: proceed to Step 4 first to resolve `NILSARK_FOLDER_ID`, then return here.
 
 ## Step 4 — Download state.md
@@ -41,18 +45,17 @@ Download state.md from Drive using the standard pattern (see `nilsark:accounting
 gws drive files list --params '{"q": "'\''<NILSARK_FOLDER_ID>'\'' in parents and trashed=false and name contains '\''.csv'\''"}' --format json
 ```
 
-If a CSV is found in Drive: download it to `$STAGING_DIR/$MONTH/` and proceed:
+If CSVs are found in Drive: download all of them to `$STAGING_DIR/$MONTH/` and proceed:
 ```bash
 gws drive files get --params '{"fileId": "<CSV_FILE_ID>", "alt": "media"}' -o "$STAGING_DIR/$MONTH/<filename>"
 ```
 
-- If exactly one CSV is found in Drive: use it.
-- If multiple CSVs are found in Drive: list them and ask the user which one to use before continuing.
-- If no CSV is found anywhere: stop and tell the user to export their bank statement CSV and upload it to `YYYY-MM/.nilsark/` in Google Drive, then re-run.
+For Handelsbanken statements, download every CSV found — they are complementary (Type A + Type B files), not alternatives.
+- If no CSV is found anywhere: stop and tell the user to export their bank statement CSV(s) and upload them to `YYYY-MM/.nilsark/` in Google Drive, then re-run.
 
-## Step 5 — Read and Parse the CSV
+## Step 5 — Read and Parse the CSV(s)
 
-Use the Read tool to read the CSV file. Apply the `match-bank-transactions` skill to identify the bank format and parse the columns.
+Use the Read tool to read all CSV files found. Apply the `match-bank-transactions` skill to identify the bank format for each file (Type A vs Type B) and merge them into a unified transaction list per the skill's pre-processing rules.
 
 ## Step 6 — Build Invoice List
 
