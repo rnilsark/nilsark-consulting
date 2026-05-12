@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="en" data-font="default">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>__TITLE__</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.cdnfonts.com/css/opendyslexic" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #fbfaf8;
+      --fg: #1a1a1a;
+      --muted: #6b6b6b;
+      --border: #e5e7eb;
+      --card: #ffffff;
+      --code-bg: #f4f4f3;
+
+      --c-problem:   #b91c1c;
+      --c-solution:  #15803d;
+      --c-tradeoff:  #a16207;
+      --c-risk:      #c2410c;
+      --c-info:      #1d4ed8;
+      --c-milestone: #475569;
+      --c-tldr:      #1d4ed8;
+      --c-note:      #525252;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #161617;
+        --fg: #f5f5f4;
+        --muted: #a8a29e;
+        --border: #2f2f31;
+        --card: #1f1f21;
+        --code-bg: #0d0d0e;
+
+        --c-problem:   #fca5a5;
+        --c-solution:  #86efac;
+        --c-tradeoff:  #fde047;
+        --c-risk:      #fdba74;
+        --c-info:      #93c5fd;
+        --c-milestone: #cbd5e1;
+        --c-tldr:      #93c5fd;
+        --c-note:      #d6d3d1;
+      }
+    }
+
+    * { box-sizing: border-box; }
+    html { background: var(--bg); color: var(--fg); scroll-behavior: smooth; }
+    body {
+      font-family: 'Atkinson Hyperlegible', system-ui, -apple-system, sans-serif;
+      font-size: 18px;
+      line-height: 1.65;
+      max-width: 76ch;
+      margin: 0 auto;
+      padding: 1rem 1.5rem 6rem;
+      counter-reset: milestone;
+    }
+    html[data-font="dyslexic"] body { font-family: 'OpenDyslexic', 'Atkinson Hyperlegible', sans-serif; letter-spacing: 0.02em; word-spacing: 0.08em; }
+    html[data-font="system"] body { font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif; }
+    html[data-font="serif"] body { font-family: 'Georgia', 'Times New Roman', serif; }
+
+    h1 { font-size: 2.2rem; line-height: 1.2; margin: 0 0 0.5rem; font-weight: 700; }
+    h2 { font-size: 1.55rem; line-height: 1.25; margin: 0 0 0.5rem; font-weight: 700; color: var(--fg); }
+    h3 { font-size: 1.1rem; line-height: 1.3; margin: 1.25rem 0 0.4rem; font-weight: 700; }
+    p { margin: 0.75rem 0; }
+    a { color: var(--c-info); }
+
+    code {
+      font-family: 'JetBrains Mono', ui-monospace, monospace;
+      font-size: 0.9em;
+      background: var(--code-bg);
+      padding: 0.1em 0.3em;
+      border-radius: 3px;
+    }
+    pre {
+      font-family: 'JetBrains Mono', ui-monospace, monospace;
+      font-size: 0.85em;
+      background: var(--code-bg);
+      padding: 1rem;
+      border-radius: 6px;
+      overflow-x: auto;
+      line-height: 1.5;
+      margin: 0.75rem 0;
+    }
+    pre code { background: none; padding: 0; font-size: 1em; }
+    ul, ol { padding-left: 1.5rem; margin: 0.5rem 0; }
+    li { margin: 0.3rem 0; }
+    blockquote { border-left: 3px solid var(--c-info); padding-left: 1rem; margin: 0.75rem 0; color: var(--muted); }
+    hr { border: 0; border-top: 1px solid var(--border); margin: 2rem 0; }
+
+    /* Scroll progress bar */
+    #scroll-progress {
+      position: fixed;
+      top: 0; left: 0;
+      height: 2px;
+      width: 0;
+      background: var(--c-info);
+      z-index: 100;
+      transition: width 0.08s linear;
+      opacity: 0.7;
+    }
+
+    /* Toolbar (in-column, sticky) */
+    .toolbar {
+      position: sticky;
+      top: 2px;
+      background: color-mix(in srgb, var(--bg) 88%, transparent);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      padding: 0.6rem 0;
+      margin-bottom: 1.5rem;
+      border-bottom: 1px solid var(--border);
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+    .toolbar-title { font-size: 0.85rem; color: var(--muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .controls { display: flex; gap: 0.5rem; }
+    .controls select { font-family: inherit; font-size: 0.85rem; padding: 0.3rem 0.55rem; background: var(--card); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; }
+    .controls select:hover { border-color: var(--c-info); }
+    .controls label.font-label { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; color: var(--muted); }
+
+    /* Hero */
+    .hero { margin: 1.5rem 0 2.5rem; }
+    .meta-block { color: var(--muted); font-size: 0.95rem; margin-top: 0.75rem; }
+    .meta-block dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 0.3rem 1rem; }
+    .meta-block dt { font-weight: 700; text-transform: capitalize; }
+    .meta-block dd { margin: 0; }
+
+    /* Pitch sections */
+    .pitch-section {
+      margin: 2.5rem 0;
+      padding: 1.4rem 1.6rem;
+      border-left: 4px solid var(--accent, var(--c-note));
+      background: var(--card);
+      border-radius: 0 8px 8px 0;
+      page-break-inside: avoid;
+    }
+    .pitch-section .kind-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      font-size: 0.72rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--accent, var(--c-note));
+      margin-bottom: 0.45rem;
+    }
+    .pitch-section .kind-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.85rem;
+      line-height: 1;
+    }
+    .pitch-section .section-body > *:first-child { margin-top: 0.25rem; }
+    .pitch-section .section-body > *:last-child { margin-bottom: 0; }
+
+    /* Per-kind accents */
+    .pitch-problem    { --accent: var(--c-problem); }
+    .pitch-solution   { --accent: var(--c-solution); }
+    .pitch-tradeoff   { --accent: var(--c-tradeoff); }
+    .pitch-risk       { --accent: var(--c-risk); }
+    .pitch-milestone  { --accent: var(--c-milestone); }
+    .pitch-note       { --accent: var(--c-note); }
+    .pitch-tldr       { --accent: var(--c-tldr); }
+
+    /* TL;DR — hero callout */
+    .pitch-tldr {
+      margin: 0 0 2.5rem;
+      padding: 1.75rem 2rem;
+      background: color-mix(in srgb, var(--c-tldr) 7%, var(--card));
+      border-left-width: 5px;
+    }
+    .pitch-tldr h2 { font-size: 1.7rem; }
+    .pitch-tldr .section-body { font-size: 1.05em; }
+
+    /* Milestone — numbered */
+    .pitch-milestone { counter-increment: milestone; }
+    .pitch-milestone .kind-icon::before {
+      content: counter(milestone);
+      display: inline-flex;
+      width: 1.35rem; height: 1.35rem;
+      align-items: center; justify-content: center;
+      border-radius: 50%;
+      background: var(--accent);
+      color: var(--card);
+      font-size: 0.78rem;
+      font-weight: 800;
+    }
+
+    /* Mermaid */
+    .mermaid {
+      background: var(--card);
+      border-radius: 8px;
+      padding: 1rem;
+      margin: 1.25rem 0;
+      text-align: center;
+      overflow-x: auto;
+    }
+    .mermaid-fallback {
+      background: var(--code-bg);
+      border: 1px dashed var(--border);
+      border-radius: 6px;
+      padding: 0.75rem;
+      margin: 1rem 0;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85em;
+      white-space: pre;
+      overflow-x: auto;
+    }
+    .mermaid-fallback::before {
+      content: "Mermaid not loaded — source below:";
+      display: block;
+      font-family: inherit;
+      color: var(--muted);
+      font-size: 0.9em;
+      margin-bottom: 0.5rem;
+    }
+
+    /* Task-list checkboxes (disabled, decorative) — for milestones using "- [ ]" */
+    li.task-item { list-style: none; margin-left: -1.5rem; padding-left: 0; }
+    li.task-item input[type="checkbox"] { margin-right: 0.5rem; transform: translateY(2px); accent-color: var(--accent); pointer-events: none; }
+
+    @media print {
+      #scroll-progress, .toolbar { display: none !important; }
+      body { max-width: none; padding: 0 1rem; }
+      .pitch-section { page-break-inside: avoid; box-shadow: none; }
+      pre { white-space: pre-wrap; word-break: break-word; }
+    }
+  </style>
+</head>
+<body>
+  <div id="scroll-progress"></div>
+
+  <header class="toolbar">
+    <div class="toolbar-title" id="toolbar-title">__TITLE__</div>
+    <div class="controls">
+      <label class="font-label" for="font-select">Font
+        <select id="font-select" title="Body font">
+          <option value="default">Atkinson Hyperlegible</option>
+          <option value="dyslexic">OpenDyslexic</option>
+          <option value="system">System default</option>
+          <option value="serif">Serif (Georgia)</option>
+        </select>
+      </label>
+    </div>
+  </header>
+
+  <main id="plan-root">
+    <div class="hero">
+      <h1 id="plan-title">__TITLE__</h1>
+      <div id="meta-slot"></div>
+    </div>
+  </main>
+
+  <script id="plan-source" type="text/plan">
+__PLAN_SOURCE__
+  </script>
+
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@14/marked.min.js"></script>
+  <script>
+    (function() {
+      'use strict';
+
+      const KIND_META = {
+        tldr:      { label: 'TL;DR',     icon: '★' },
+        problem:   { label: 'Problem',   icon: '⚠' },
+        solution:  { label: 'Solution',  icon: '✓' },
+        tradeoff:  { label: 'Tradeoff',  icon: '⚖' },
+        risk:      { label: 'Risk',      icon: '!' },
+        milestone: { label: 'Milestone', icon: '' },
+        note:      { label: 'Note',      icon: '◆' },
+      };
+
+      const titleEl = document.getElementById('plan-title');
+      const toolbarTitleEl = document.getElementById('toolbar-title');
+      const planRoot = document.getElementById('plan-root');
+      const metaSlot = document.getElementById('meta-slot');
+      const planSource = document.getElementById('plan-source').textContent;
+
+      function parseSections(src) {
+        const lines = src.split('\n');
+        const sections = [];
+        let current = null;
+        let inFence = false;
+        const headerRe = /^##\s+(\w[\w-]*):\s*(.+?)\s*$/;
+        for (const line of lines) {
+          if (/^```/.test(line)) inFence = !inFence;
+          const m = !inFence ? line.match(headerRe) : null;
+          if (m) {
+            if (current) sections.push(current);
+            current = { kind: m[1].toLowerCase(), title: m[2], body: [] };
+          } else if (current) {
+            current.body.push(line);
+          }
+        }
+        if (current) sections.push(current);
+        return sections.map(s => ({ ...s, body: s.body.join('\n').trim() }));
+      }
+
+      function renderMetaBlock(metas) {
+        if (Object.keys(metas).length === 0) return null;
+        const wrap = document.createElement('div');
+        wrap.className = 'meta-block';
+        const dl = document.createElement('dl');
+        for (const [k, v] of Object.entries(metas)) {
+          const dt = document.createElement('dt');
+          dt.textContent = k.replace(/-/g, ' ');
+          const dd = document.createElement('dd');
+          dd.textContent = v;
+          dl.append(dt, dd);
+        }
+        wrap.append(dl);
+        return wrap;
+      }
+
+      function processMermaidIn(bodyEl) {
+        bodyEl.querySelectorAll('pre > code.language-mermaid').forEach(code => {
+          const pre = code.parentNode;
+          const div = document.createElement('div');
+          div.className = 'mermaid';
+          div.textContent = code.textContent;
+          pre.replaceWith(div);
+        });
+      }
+
+      function decorateTaskList(bodyEl) {
+        bodyEl.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+          const li = cb.closest('li');
+          if (li) li.classList.add('task-item');
+        });
+      }
+
+      function renderSection(section) {
+        const meta = KIND_META[section.kind];
+        if (!meta) return null;
+
+        const sectionEl = document.createElement('section');
+        sectionEl.className = 'pitch-section pitch-' + section.kind;
+        sectionEl.id = section.kind + '-' + section.title.toLowerCase().replace(/[^\w]+/g, '-').replace(/^-+|-+$/g, '');
+
+        const head = document.createElement('header');
+        head.className = 'section-head';
+
+        const badge = document.createElement('span');
+        badge.className = 'kind-badge';
+        const icon = document.createElement('span');
+        icon.className = 'kind-icon';
+        if (meta.icon) icon.textContent = meta.icon;
+        badge.append(icon, document.createTextNode(' ' + meta.label));
+        head.append(badge);
+
+        const h2 = document.createElement('h2');
+        h2.textContent = section.title;
+        head.append(h2);
+        sectionEl.append(head);
+
+        const body = document.createElement('div');
+        body.className = 'section-body';
+        body.innerHTML = marked.parse(section.body);
+        processMermaidIn(body);
+        decorateTaskList(body);
+        sectionEl.append(body);
+
+        return sectionEl;
+      }
+
+      // Font
+      const fontSelect = document.getElementById('font-select');
+      function setFont(mode) {
+        document.documentElement.dataset.font = mode;
+        if (fontSelect) fontSelect.value = mode;
+        try { localStorage.setItem('pln:font', mode); } catch {}
+      }
+      fontSelect.addEventListener('change', e => setFont(e.target.value));
+
+      // Scroll progress
+      const progressBar = document.getElementById('scroll-progress');
+      function updateProgress() {
+        const max = document.documentElement.scrollHeight - window.innerHeight;
+        const pct = max > 0 ? (window.scrollY / max) * 100 : 0;
+        progressBar.style.width = pct + '%';
+      }
+      window.addEventListener('scroll', updateProgress, { passive: true });
+      window.addEventListener('resize', updateProgress);
+
+      // Mermaid
+      function mermaidFallback() {
+        document.querySelectorAll('.mermaid').forEach(el => {
+          if (el.querySelector('svg')) return;
+          const pre = document.createElement('pre');
+          pre.className = 'mermaid-fallback';
+          pre.textContent = el.textContent;
+          el.replaceWith(pre);
+        });
+      }
+      function renderMermaid() {
+        if (!window.mermaid) {
+          setTimeout(() => { if (!window.mermaid) mermaidFallback(); }, 3000);
+          return;
+        }
+        try {
+          mermaid.initialize({
+            startOnLoad: false,
+            theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default',
+            securityLevel: 'strict',
+          });
+          const nodes = document.querySelectorAll('.mermaid');
+          if (nodes.length === 0) return;
+          mermaid.run({ nodes }).catch(err => { console.warn(err); mermaidFallback(); });
+        } catch (err) {
+          console.warn(err);
+          mermaidFallback();
+        }
+      }
+
+      function main() {
+        const headerTitle = titleEl.textContent.trim();
+        if (headerTitle && headerTitle !== '__TITLE__') {
+          document.title = headerTitle;
+          toolbarTitleEl.textContent = headerTitle;
+        }
+
+        try {
+          const saved = localStorage.getItem('pln:font');
+          if (saved) setFont(saved);
+        } catch {}
+
+        if (!window.marked) {
+          const pre = document.createElement('pre');
+          pre.textContent = 'marked.js failed to load (check network). Plan source:\n\n' + planSource;
+          planRoot.append(pre);
+          return;
+        }
+
+        marked.setOptions({ gfm: true, breaks: false });
+
+        const sections = parseSections(planSource);
+        const metas = {};
+        const renderable = [];
+        for (const s of sections) {
+          if (s.kind === 'meta') metas[s.title] = s.body;
+          else renderable.push(s);
+        }
+        const metaBlock = renderMetaBlock(metas);
+        if (metaBlock) metaSlot.append(metaBlock);
+
+        for (const s of renderable) {
+          const el = renderSection(s);
+          if (el) planRoot.append(el);
+        }
+
+        renderMermaid();
+        updateProgress();
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', main);
+      } else {
+        main();
+      }
+    })();
+  </script>
+</body>
+</html>
