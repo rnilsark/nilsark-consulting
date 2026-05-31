@@ -110,15 +110,27 @@ gws drive files get --params '{"fileId": "<file_id>", "alt": "media"}' -o "$STAG
 
 **Create ONE draft per type with all files attached:**
 
+Use the `+send --draft` helper with `-a/--attach` (one per file). `cd` into the
+month staging directory first and pass relative filenames — do not pass absolute
+paths in `-a`.
+
 ```bash
-gws gmail +draft \
+cd "$STAGING_DIR/$MONTH"
+gws gmail +send --draft \
   --to <fortnox_email> \
   --subject "Nilsark Consulting AB <type-label> $MONTH" \
   --body "Bifogade filer: <comma-separated list of filenames>" \
-  --attachment "$STAGING_DIR/$MONTH/file1.pdf" \
-  --attachment "$STAGING_DIR/$MONTH/file2.pdf" \
+  -a "file1.pdf" \
+  -a "file2.pdf" \
   ...
 ```
+
+Capture the draft id from the JSON response (`.id`). **Do not pipe `gws` through
+`jq` with `2>&1`** — `gws` prints a `Using keyring backend` banner to stderr that
+corrupts the JSON stream and makes a successful create look like a failure. Pipe
+stdout only (`2>/dev/null | jq ...`) or read the raw output. Treat a non-zero
+**exit code** as the failure signal, not a `jq` parse error — re-running after a
+masked success creates duplicate drafts.
 
 Subject type-labels:
 - Verifikationer: `kvitton`
