@@ -136,5 +136,5 @@ Double-check `DRIVE_ROOT_FOLDER_ID` in `~/.nilsark-config.md`. It must be the fo
 ### PDF not readable
 Claude reads PDFs natively. Password-protected or corrupted PDFs will be marked `unknown` and flagged for manual review.
 
-### Bank CSV format changed
-SEB occasionally updates their export format. Check the first row of your CSV against the expected columns in [state-schema.md](state-schema.md).
+### Bank statement format changed
+If Handelsbanken updates their export format, check the first row of your CSV (or the column layout of the PDF) against the expected columns in the `match-bank-transactions` skill.

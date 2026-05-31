@@ -102,12 +102,12 @@ This file is the single source of truth for all processing status. Every command
 
 ## Table: Bank Statement Transactions
 
-**Purpose:** Records all bank transactions from the CSV export, with match results.
+**Purpose:** Records all bank transactions from the statement (CSV export or PDF), with match results.
 
 | Column | Type | Description |
 |--------|------|-------------|
 | `date` | ISO 8601 date | Bokföringsdag |
-| `description` | string | Avsändare/mottagare or Transaktion from bank CSV |
+| `description` | string | Payee/counterparty or transaction text from the statement (`Referens` in the Handelsbanken CSV, or the equivalent PDF row text) |
 | `amount` | decimal | Belopp (negative = outgoing payment) |
 | `currency` | string | Currency (SEK) |
 | `matched_to_file` | string | Filename of the matched document, or blank |

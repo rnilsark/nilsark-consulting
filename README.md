@@ -9,7 +9,7 @@ Each month you receive invoices and receipts via Gmail. This system:
 1. **Fetches** email attachments from Gmail to a local staging folder
 2. **Classifies** each PDF as a leverantörsfaktura or kvitto, extracts accounting fields, and files it to the correct Google Drive subfolder
 3. **Tracks** unpaid leverantörsfakturor and flags overdue items
-4. **Matches** your bank statement CSV against invoices to update payment status
+4. **Matches** a bank statement (CSV or PDF) against invoices to update payment status — drop it in the staging `drop/` folder and `/fetch-classify` picks it up automatically
 5. **Closes** the month by routing all documents to Fortnox via email
 
 All state lives in Google Drive (`state.md` per month). Local staging is temporary only.
@@ -131,19 +131,13 @@ Shows all unpaid leverantörsfakturor with due dates and amounts. Flags overdue 
 
 ### Step 4 — Match bank statement
 
-Export your bank statement as CSV and upload it to the `.nilsark/` folder inside your month folder in Google Drive:
+Bank matching is built into `/fetch-classify`. Export your Handelsbanken statement — as a **CSV** or a **PDF** — and drop it into the staging `drop/` folder:
 
 ```
-2026-03/.nilsark/kontohändelser-2026-03.csv
+$STAGING_DIR/drop/kontoutdrag-2026-03.pdf
 ```
 
-Then run:
-
-```
-/match-bank 2026-03
-```
-
-Matches transactions against invoices, updates payment status in `state.md`.
+Then run `/fetch-classify` as usual. It detects the statement, matches transactions against unpaid invoices, updates payment status in `state.md`, archives the statement to `2026-03/.nilsark/`, and prints a match report listing every transaction line.
 
 ### Step 5 — Close the month
 

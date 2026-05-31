@@ -1,5 +1,5 @@
 ---
-description: "Fetch and classify Gmail attachments for the current (or specified) month, uploading to Drive in a single pass. Safe to run multiple times. Usage: /fetch-classify [YYYY-MM]"
+description: "Fetch and classify Gmail attachments for the current (or specified) month, uploading to Drive in a single pass. Also matches any bank statement (CSV or PDF) left in the drop folder against unpaid invoices. Safe to run multiple times. Usage: /fetch-classify [YYYY-MM]"
 argument-hint: YYYY-MM (defaults to current month)
 allowed-tools: ["Read", "Bash"]
 ---
@@ -149,7 +149,7 @@ Capture `UPLOAD_EXIT=$?` (shown above for first run; for `files update` in the n
 
 ## Step 7c — Pick Up Drop Folder Files
 
-Initialize `DROP_FILES=()` to track which files in `NEWLY_DOWNLOADED` came from the drop folder.
+Initialize `DROP_FILES=()` to track which files in `NEWLY_DOWNLOADED` came from the drop folder, and `BANK_STATEMENTS=()` to track bank statements (these are matched in Step 8b, not classified as documents).
 
 Check whether `$STAGING_DIR/drop/` contains any files (non-hidden regular files only):
 ```bash
@@ -160,20 +160,32 @@ shopt -u nullglob
 
 For each file found:
 
-**a) Dedup check:** If a row with this filename already exists in the Documents table in `$MONTH-state.md`, skip it — already classified and uploaded.
+**a) Bank-statement detection (runs first).** Decide whether the file is a bank statement rather than an accounting document:
+- **Any `.csv` file → bank statement.** Accounting documents are always PDFs; a CSV in the drop folder is a Handelsbanken export.
+- **A `.pdf` file is a bank statement** if, when read, it shows a *list of account transactions with a running balance* (e.g. `Bokfört saldo`), an account number, and a Handelsbanken statement header (`Kontoutdrag`, `Kontohändelser`, `Transaktioner`). Contrast with an invoice/receipt, which has a single supplier, a single total, and typically an OCR/förfallodatum.
 
-**b) Collision check:** If a file with the same name already exists in `$STAGING_DIR/$MONTH/`, rename the incoming file by appending `_drop` before the extension (e.g. `faktura.pdf` → `faktura_drop.pdf`).
+If the file is a bank statement: **collision-check and move it into the month staging directory** (same rename-on-collision rule as step c below), add `<filename>` to `BANK_STATEMENTS`, and continue to the next file. Do **not** add it to `NEWLY_DOWNLOADED` (it must skip document classification in Step 8).
 
-**c) Move** the file into the month staging directory:
+Otherwise treat it as a document and continue with b–d.
+
+**b) Dedup check:** If a row with this filename already exists in the Documents table in `$MONTH-state.md`, skip it — already classified and uploaded.
+
+**c) Collision check:** If a file with the same name already exists in `$STAGING_DIR/$MONTH/`, rename the incoming file by appending `_drop` before the extension (e.g. `faktura.pdf` → `faktura_drop.pdf`).
+
+**d) Move** the file into the month staging directory:
 ```bash
 mv "$STAGING_DIR/drop/<filename>" "$STAGING_DIR/$MONTH/<filename>"
 ```
 
-**d)** Add `<filename>` to both `NEWLY_DOWNLOADED` and `DROP_FILES`.
+**e)** Add `<filename>` to both `NEWLY_DOWNLOADED` and `DROP_FILES`.
 
-If any files were moved, print:
+If any document files were moved, print:
 ```
 Drop folder: N file(s) added to this run.
+```
+If any bank statements were found, print:
+```
+Drop folder: N bank statement(s) detected — will match after classification.
 ```
 
 ## Step 8 — Classify New Files
@@ -280,6 +292,26 @@ For Gmail files: update the matching row in `$MONTH-state.md` Processed Gmail Me
 
 For drop-folder files: do NOT write to the Processed Gmail Messages table. The Documents table row is the only state record needed.
 
+## Step 8b — Match Bank Statements
+
+Run this step only if `BANK_STATEMENTS` is non-empty. It runs *after* classification so that invoices fetched in the same pass are already in the Documents table and available to match.
+
+**a) Read and parse each statement.** Use the Read tool to open each file in `BANK_STATEMENTS` (PDF or CSV). Apply the `match-bank-transactions` skill to produce a flat list of outgoing transactions (one row per transaction, Swedish number normalization applied).
+
+**b) Build the invoice list.** From the Documents table in `$MONTH-state.md`, collect all rows where `type = leverantörsfaktura` AND `payment_status` is `unpaid` or `overdue`.
+
+**c) Match.** Apply the `match-bank-transactions` matching logic to each outgoing transaction. For each match: set `payment_status = paid` on the matched Documents row. Record every outgoing transaction (matched and unmatched) in the Bank Statement Transactions table.
+
+**Dedup:** Before appending a Bank Statement Transactions row, check whether an identical (date, amount, description) row already exists — if so, skip the append so re-dropping the same statement does not duplicate rows. Re-matching an already-`paid` invoice is a no-op.
+
+**d) Archive the statement to Drive.** Upload each processed statement to the `.nilsark/` folder for an audit trail, then remove the local copy from staging:
+```bash
+gws drive +upload "$STAGING_DIR/$MONTH/<filename>" --parent "$NILSARK_FOLDER_ID" --format json
+```
+If the upload fails, leave the local file in place and report it in the Step 11 summary under upload errors — do not delete an unarchived statement.
+
+Keep a record of the match results (matched/fuzzy/unmatched counts and the per-line details) for the Step 11 report.
+
 ## Step 9 — Update Month Summary
 
 Recount all rows in `$MONTH-state.md` and update its Month Summary section.
@@ -323,6 +355,22 @@ Files saved to: $STAGING_DIR/2026-03/
 ```
 
 Omit the `Drop folder files picked up` line if `DROP_FILES` is empty.
+
+If `BANK_STATEMENTS` was non-empty (Step 8b ran), append a bank match section. Since matching runs automatically, **list every transaction line** so the results are visible at a glance:
+```
+Bank match (S statement(s) processed):
+  Matched (exact):
+    ✓ Telia Sverige AB — 1 250,00 SEK — paid 2026-03-20
+  Matched (fuzzy — review recommended):
+    ~ AWS EMEA SARL — 890,00 SEK — amount+name, no OCR
+  Unmatched outgoing transactions (no invoice found):
+    - 2026-03-05 | Skatteverket | -8 500,00 SEK
+  Still unpaid invoices:
+    - Fortnox AB — 450,00 SEK — due 2026-04-10
+
+  Summary: X matched, Y fuzzy, Z unmatched
+  → If a line looks wrong, re-drop the statement (matching re-runs) or fix state.md.
+```
 
 If U > 0, list the unknown files and the reason classification was uncertain:
 ```
