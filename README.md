@@ -14,6 +14,18 @@ Each month you receive invoices and receipts via Gmail. This system:
 
 All state lives in Google Drive (`state.md` per month). Local staging is temporary only.
 
+### AI CFO heartbeat
+
+`/cfo-run` is the recurring orchestrator: it runs collection + classification + bank
+matching, refreshes payment status, scans for anomalies, and emails you a **todo** of the
+things only you can do — **PAY** (invoices, BankID), **EXPORT** (bank statement, BankID), and
+**APPROVE** (spot-check and send the bookkeeper draft) — sorted by urgency. Email behavior
+follows a strict rule (see
+`cfo-policy`): **Fortnox/bookkeeper emails are always drafts (never sent)**, while
+**self-notifications are sent only to your own address**. The agent never pays or does
+BankID. You are the scheduler for now — run `/cfo-run` weekly/biweekly; `/month-close`
+handles the monthly full close. See [docs/cfo-architecture.md](docs/cfo-architecture.md).
+
 ---
 
 ## Plugins

@@ -23,6 +23,10 @@ MY_EMAIL=$(grep '^MY_EMAIL=' ~/.nilsark-config.md | cut -d= -f2-)
 DRY_RUN=false
 ```
 
+> **Send rule (strict):** Everything this command produces for Fortnox is a **draft** —
+> always pass `--draft` to `gws gmail +send`. **Never** send a Fortnox email. The user
+> spot-checks the drafts and sends them. This command sends nothing.
+
 Check if `--dry-run` is in `$ARGUMENTS` and set `DRY_RUN=true` if so.
 
 ## Step 2 — Determine Month
@@ -65,7 +69,8 @@ Process each document type in order. For each type, if the corresponding config 
 
 ## Step 6 — Dry Run Output
 
-If `DRY_RUN=true`, print the full routing plan and stop:
+If `DRY_RUN=true`, print the routing plan (recipient, subject, and the attached filenames per
+type), then stop:
 
 ```
 DRY RUN — Month Close 2026-03
@@ -73,17 +78,17 @@ No drafts will be created.
 
 Would send (1 email per type):
   → FORTNOX_VERIFIKATION  (1 email, 2 attachments)
-    Supplier A — receipt-a.pdf
-    Supplier B — receipt-b.pdf
+    Subject: Nilsark Consulting AB — kvitton — 2026-03
+    Bifogade filer: receipt-a.pdf, receipt-b.pdf
 
   → FORTNOX_LEVERANTORSFAKTURA  (1 email, 2 attachments)
-    Supplier C — invoice-c.pdf
-    Supplier D — invoice-d.pdf
+    Subject: Nilsark Consulting AB — leverantörsfakturor — 2026-03
+    Bifogade filer: invoice-c.pdf, invoice-d.pdf
 
   → FORTNOX_SKATTEKONTO  skipped — FORTNOX_EMAIL_SKATTEKONTO not configured
-
   → FORTNOX_KUNDFAKTURA  (1 email, 1 attachment)
-    client-invoice-2026-03.pdf
+    Subject: Nilsark Consulting AB — kundfakturor — 2026-03
+    Bifogade filer: client-invoice-2026-03.pdf
 
 No drafts will be created. Re-run without --dry-run to create them.
 ```
@@ -110,16 +115,17 @@ gws drive files get --params '{"fileId": "<file_id>", "alt": "media"}' -o "$STAG
 
 **Create ONE draft per type with all files attached:**
 
-Use the `+send --draft` helper with `-a/--attach` (one per file). `cd` into the
-month staging directory first and pass relative filenames — do not pass absolute
-paths in `-a`.
+Follow the `bookkeeping` skill: the body is just a short list of the attached filenames — no
+summaries, accounts, or sums. Use `gws gmail +send --draft` with `-a/--attach` (one per file)
+— **always `--draft`**, this is a Fortnox email so it must never be sent. `cd` into the month
+staging directory first and pass relative filenames — do not pass absolute paths in `-a`.
 
 ```bash
 cd "$STAGING_DIR/$MONTH"
 gws gmail +send --draft \
   --to <fortnox_email> \
-  --subject "Nilsark Consulting AB <type-label> $MONTH" \
-  --body "Bifogade filer: <comma-separated list of filenames>" \
+  --subject "Nilsark Consulting AB — <type-label> — $MONTH" \
+  --body "Bifogade filer: file1.pdf, file2.pdf" \
   -a "file1.pdf" \
   -a "file2.pdf" \
   ...

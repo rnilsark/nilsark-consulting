@@ -1,6 +1,6 @@
 {
   "name": "nilsark",
-  "description": "Monthly accounting workflow commands for NILSARK CONSULTING AB. Orchestrates Gmail fetching, document classification, payment tracking, bank matching, and Fortnox routing.",
+  "description": "AI CFO for NILSARK CONSULTING AB. Orchestrates Gmail fetching, document classification, payment tracking, bank matching, and the bookkeeper handoff — with a recurring finance heartbeat (/cfo-run) and a permanent human gate (never auto-sends or pays).",
   "author": {"name": "NILSARK CONSULTING AB"},
   "license": "MIT"
 }
