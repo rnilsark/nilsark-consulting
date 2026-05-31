@@ -49,5 +49,9 @@ FORTNOX_EMAIL_KUNDFAKTURA=your-fortnox-kundfaktura-email@fortnox.se
 
 ## Your Email
 
-# Your own email address (used as BCC on Fortnox routing for audit trail)
+# Your own email address. Two uses:
+#  - BCC on Fortnox routing for audit trail
+#  - Recipient for the CFO self-notification the agent SENDS: the todo
+#    (PAY / EXPORT / APPROVE). Sender = receiver = you.
+# The agent only ever sends to THIS address; everything to Fortnox is a draft.
 MY_EMAIL=you@example.com
