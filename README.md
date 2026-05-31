@@ -169,11 +169,11 @@ Routes all documents to Fortnox via email and marks the month as closed.
 
 ## State File
 
-Each month has a `state.md` in Google Drive that tracks every document and its status. See [docs/state-schema.md](docs/state-schema.md) for the full schema.
+Each month has a `state.md` in Google Drive that tracks every document and its status. The full schema (template + column reference) lives in the `nilsark:accounting-state` skill.
 
 ## Fortnox Routing
 
-See [docs/fortnox-routing.md](docs/fortnox-routing.md) for routing rules and known limitations.
+`/month-close` routes documents to Fortnox — one draft email per document type, the type's PDFs attached. The handoff format is defined in the `nilsark:bookkeeping` skill; finding your Fortnox import addresses is covered in [docs/setup.md](docs/setup.md).
 
 ## New Machine Setup
 

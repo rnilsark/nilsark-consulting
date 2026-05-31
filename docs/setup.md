@@ -98,6 +98,10 @@ mkdir -p /mnt/c/Users/YourWindowsName/.nilsark/drop
 
 The `drop/` subfolder is your receipt inbox — drag PDFs and images here and they will be picked up automatically on the next `/fetch-classify` run.
 
+### Finding your Fortnox import addresses
+
+`/month-close` routes documents to Fortnox by emailing them to per-type import addresses (the `FORTNOX_EMAIL_*` values in your config). Fortnox provides these under **Inställningar → Integrationer → E-postimport**. Typical format: `{company-id}+{type}@import.fortnox.se`. Check your Fortnox account settings or contact Fortnox support to find your specific addresses.
+
 ---
 
 ## 5. Register Plugins Permanently
