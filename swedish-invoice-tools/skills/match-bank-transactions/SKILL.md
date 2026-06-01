@@ -51,20 +51,40 @@ Both conditions must be true:
 
 Mark as `fuzzy`. Flag for human review — fuzzy matches can be wrong.
 
-### 3. No Match
-The transaction has no matching invoice. Mark as `unmatched`. This could be a legitimate
-payment not in the invoice list (salary, tax, personal) or an invoice missing from
-state.md (not yet classified).
+### 3. Prior-Month Match (already sent to bookkeeping)
+A payment often settles an invoice that was **booked in an earlier month** — the invoice
+arrived and was classified/sent to the bookkeeper last month, but its `due_date` (or the
+supplier's charge cycle) falls into this month, so the money only leaves now. This is the
+normal cash-lag across a month boundary, **not** a missing document.
+
+If the supplied invoice list includes carried-over invoices from a prior period (rows the
+caller has tagged as already booked/sent), and an outgoing payment matches one of them by
+exact or fuzzy criteria above, mark it `prior-month` and note the source file and the month
+it was sent. **Do not mark it `unmatched`, and do not re-book it** — it is already in an
+earlier month's verifikat.
+
+Examples that recur every month: Google Workspace (invoice dated the last day of the service
+month, charged ~4 days into the next month), and any leverantörsfaktura whose `due_date` is
+in the following month (e.g. tax/Skatteverket, leasing).
+
+### 4. No Match
+The transaction matches no invoice in the list — current month or prior. Mark as `unmatched`.
+This is a legitimate non-invoice payment (salary, owner transfer, bank fee, personal) or an
+invoice genuinely missing from state.md (not yet classified). Before calling something
+unmatched, confirm it is not a prior-month invoice already sent to bookkeeping.
 
 ## Output
 
 For each match, state the bank row (date, amount, description), the matched invoice
 (supplier, amount, due_date), and the confidence level.
 
-Report three lists:
-1. **Matched invoices** — mark `payment_status = paid`
-2. **Unmatched bank transactions** — outgoing payments with no invoice match
-3. **Unpaid invoices** — invoices with no matching bank transaction
+Report four lists:
+1. **Matched invoices** — current-month invoices; mark `payment_status = paid`
+2. **Prior-month settlements** — payments matching an invoice already booked/sent in an
+   earlier month; mark the bank row `prior-month` with the source file and sent-month.
+   Mark that prior invoice `paid` in its own month's state (do not re-book it in this month).
+3. **Unmatched bank transactions** — outgoing payments with no invoice match in any period
+4. **Unpaid invoices** — invoices with no matching bank transaction
 
 ## Notes
 
@@ -72,3 +92,6 @@ Report three lists:
 - Ignore incoming transactions (amount > 0) for invoice matching purposes
 - If a single bank transaction matches multiple invoices (e.g., bulk payment), flag it
   for manual review rather than auto-assigning
+- A month's statement normally contains a few `prior-month` settlements — invoices whose
+  `due_date` landed in this month but were booked last month. Treat them as matched
+  (already sent), never as unmatched/missing.

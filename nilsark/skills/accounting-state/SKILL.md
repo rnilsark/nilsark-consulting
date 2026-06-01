@@ -215,7 +215,11 @@ This file is the single source of truth for all processing status. Every command
 **Match confidence values:**
 - `exact` — amount matches AND OCR number found in transaction text
 - `fuzzy` — amount matches within 1 SEK AND supplier name partial-matches
-- `unmatched` — no matching invoice found
+- `prior-month` — settles an invoice booked/sent in an earlier month (its `due_date` fell in
+  this month); `matched_to_file` is that prior invoice, with a note `already sent for
+  bookkeeping in YYYY-MM`. Do not re-book it in this month.
+- `unmatched` — no matching invoice found in any period (salary, owner transfer, bank fee, or
+  a genuinely missing/unclassified invoice)
 
 ### Month Summary
 

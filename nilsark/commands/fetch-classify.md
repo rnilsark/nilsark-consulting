@@ -298,9 +298,15 @@ Run this step only if `BANK_STATEMENTS` is non-empty. It runs *after* classifica
 
 **a) Read and parse each statement.** Use the Read tool to open each file in `BANK_STATEMENTS` (PDF or CSV). Apply the `match-bank-transactions` skill to produce a flat list of outgoing transactions (one row per transaction, Swedish number normalization applied).
 
-**b) Build the invoice list.** From the Documents table in `$MONTH-state.md`, collect all rows where `type = leverantörsfaktura` AND `payment_status` is `unpaid` or `overdue`.
+**b) Build the invoice list.** Collect two sets:
+- **Current month** — from the Documents table in `$MONTH-state.md`, all rows where `type = leverantörsfaktura` OR `type = skattekonto`, AND `payment_status` is `unpaid` or `overdue`.
+- **Prior month (carry-over)** — an invoice's `due_date` often falls in the month *after* it was booked, so this month's statement pays an invoice that was classified and **already sent to the bookkeeper last month**. Download the previous month's `state.md` (resolve `<root>/<prev-YYYY-MM>/.nilsark/state.md`; skip silently if it doesn't exist) and collect its `leverantörsfaktura`/`skattekonto` rows still marked `unpaid` or `overdue`. Tag these as **prior-month / already-sent** so the matcher does not treat their payments as unmatched.
 
-**c) Match.** Apply the `match-bank-transactions` matching logic to each outgoing transaction. For each match: set `payment_status = paid` on the matched Documents row. Record every outgoing transaction (matched and unmatched) in the Bank Statement Transactions table.
+**c) Match.** Apply the `match-bank-transactions` matching logic to each outgoing transaction against the combined list. For each match:
+- **Current-month invoice** → set `payment_status = paid` on the matched Documents row in `$MONTH-state.md`; record the bank row with confidence `exact`/`fuzzy`.
+- **Prior-month invoice** → record the bank row with confidence `prior-month`, `matched_to_file = <that invoice's filename>`, and a note `already sent for bookkeeping in <prev-YYYY-MM>`. Do **not** add or re-book the document in `$MONTH`. Set `payment_status = paid` on that row in the **previous month's** `state.md` and re-upload it (use the `files update` pattern with its captured file ID) so the prior month stops showing a stale `unpaid`.
+
+Record every outgoing transaction (matched, prior-month, and unmatched) in the Bank Statement Transactions table. An outgoing payment is only `unmatched` once it fails against **both** the current- and prior-month lists.
 
 **Dedup:** Before appending a Bank Statement Transactions row, check whether an identical (date, amount, description) row already exists — if so, skip the append so re-dropping the same statement does not duplicate rows. Re-matching an already-`paid` invoice is a no-op.
 
@@ -363,12 +369,14 @@ Bank match (S statement(s) processed):
     ✓ Telia Sverige AB — 1 250,00 SEK — paid 2026-03-20
   Matched (fuzzy — review recommended):
     ~ AWS EMEA SARL — 890,00 SEK — amount+name, no OCR
-  Unmatched outgoing transactions (no invoice found):
-    - 2026-03-05 | Skatteverket | -8 500,00 SEK
+  Prior-month settlements (already sent to bookkeeping — not this month's):
+    ↩ Google Workspace — 75,56 SEK — invoice 5559248118, sent 2026-04
+  Unmatched outgoing transactions (no invoice found, any period):
+    - 2026-03-05 | Owner transfer | -8 500,00 SEK
   Still unpaid invoices:
     - Fortnox AB — 450,00 SEK — due 2026-04-10
 
-  Summary: X matched, Y fuzzy, Z unmatched
+  Summary: X matched, Y fuzzy, P prior-month, Z unmatched
   → If a line looks wrong, re-drop the statement (matching re-runs) or fix state.md.
 ```
 
