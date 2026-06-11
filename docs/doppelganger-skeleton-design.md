@@ -89,29 +89,35 @@ DB-kontraktet aldrig glider isär. `better-sqlite3` (synkront, passar dispatcher
 | `task` | text | payload, går in i prompten |
 | `status` | text | `pending` → `running` |
 | `parent` | text, null | `run_id` för körningen som la denna order. `null` = toppnivå (adapter-lagd) |
-| `run_id` | text, null | sätts vid `running`; den durabla id workern tilldelar (= `events.id`) |
+| `run_id` | text, null | sätts vid `running` (av dispatchern); durabel ULID som körningens events-rader delar |
 | `pid` | int, null | workerns process-id, sätts vid `running`, för krasch-städ |
 | `running_since` | ts, null | när `running` sattes |
+| `attempts` | int | antal startförsök; styr retry-taket vid krasch (default 0) |
 | `created_at` | ts | upptäcka stale `pending` (= dispatcher nere = larm) |
 
-### `events` — append-only historik (muteras aldrig; bär även anropsträdet)
+### `events` — append-only livscykel-logg (muteras aldrig; bär även anropsträdet)
+En körning ger **flera** rader: `started` … (`finished` | `died`). Nuläget är en *projektion* —
+folda per `run_id`. `started`-utan-avslut = kör just nu (pulsa). `parent`/`cost`/`summary`/`status`
+sitter på avslutsraden.
 | fält | typ | syfte |
 |---|---|---|
-| `id` | text PK | = `run_id`. ULID (tids-sorterbar), genereras av workern vid start |
-| `ts` | ts | när körningen avslutades |
+| `id` | PK auto | radens id (en rad per livscykel-event, inte per körning) |
+| `run_id` | text | binder ihop en körnings rader (`started` ↔ `finished`/`died`). ULID |
+| `kind` | text | `started` / `finished` / `died` |
+| `ts` | ts | när detta event inträffade |
 | `agent` | text | vem körde (= nod i grafen) |
 | `task` | text | vad — *och* payloaden på inkommande kant |
-| `parent` | text, null | `run_id` för förälder-körningen (= kant A→B). `null` = toppnivå |
-| `status` | text | `success` / `flagged` / `error` |
-| `cost` | real | kostnad för körningen (ur `--output-format json`) |
-| `summary` | text | agentens egna ord (ur `out.json`) |
+| `parent` | text, null | `run_id` för förälder-körningen (= kant A→B). `null` = toppnivå. (på `finished`) |
+| `status` | text, null | på `finished`: `success` / `flagged` / `error` |
+| `cost` | real, null | på `finished`: kostnad (ur `total_cost_usd`) |
+| `summary` | text, null | på `finished`: agentens egna ord (ur `out.json`) |
 
-**Ingen `messages`-tabell.** En kant A→B *är* en order i kön och blir en event-rad hos B med
+**Ingen `messages`-tabell.** En kant A→B *är* en order i kön och blir B:s `finished`-event med
 `parent` = A:s run_id. Nodgrafen härleds helt ur `events`: nod = `agent`; kant = `parent`;
-kantens payload = mottagarens `task`; tid = `ts`.
+kantens payload = mottagarens `task`; tid = `ts`. Live "kör nu"-noder = `started` utan `finished`/`died`.
 
-**Index:** `events(ts)`, `events(agent)`, `events(parent)`; `queue(status)`. WAL på (flera
-parallella skrivande workers).
+**Index:** `events(run_id)`, `events(ts)`, `events(agent)`, `events(parent)`; `queue(status)`.
+WAL på (flera parallella skrivande workers).
 
 ---
 
@@ -132,10 +138,11 @@ trög, inspekterbar (filen ligger kvar för debug), håller workern dum, och age
 injiceras in i agenten. Live-uppdatering av dashboarden är inte värt den risken nu.)
 
 ### run_id (LÅST)
-Workern genererar ett **ULID** när den plockar kö-raden, *före* `claude` startar. Det blir
-`events.id` och stämplas in i alla barn-ordrar/-rader som `parent`. **Agenten ser aldrig sitt
-eget run_id.** Eftersom A:s event + barn-ordrar skrivs i *samma* transaktion vid A:s slut finns
-A:s event alltid när något pekar på det → inga dinglande referenser.
+**Dispatchern** genererar ett **ULID** när den markerar kö-raden `running`, *före* workern
+startar. Det skrivs på queue-raden, in i körningens events-rader (`run_id`) och stämplas som
+`parent` i alla barn-ordrar. **Agenten ser aldrig sitt eget run_id.** Eftersom A:s `finished`
++ barn-ordrar skrivs i *samma* transaktion vid A:s slut finns A:s avslutsrad alltid när något
+pekar på den → inga dinglande referenser. (A:s `started` finns redan dessförinnan.)
 
 ---
 
@@ -144,24 +151,35 @@ A:s event alltid när något pekar på det → inga dinglande referenser.
    vid nytt arbete: `INSERT queue (agent, task, status=pending, parent=null, created_at=now)`.
 2. **Dispatcher** (loop ~5s i samma process som schedulern, blockerar aldrig):
    - **Städa först:** för varje `running`-rad, kolla `pid`-liv (`os.kill(pid,0)` / `/proc/<pid>`).
-     Lever → lämna ifred oavsett hur länge. Dött → återställ till `pending` (nolla `pid`/`run_id`/`running_since`).
-   - **Plocka FIFO atomärt:** `UPDATE queue SET status=running, pid=?, run_id=?, running_since=now WHERE id=? AND status=pending`.
-   - Starta worker med `run_id`.
+     Lever → lämna ifred oavsett hur länge. Dött → `INSERT events(kind=died, run_id, agent)`, sedan:
+     `attempts < tak` → återställ till `pending` (`attempts++`, nolla `pid`/`run_id`/`running_since`);
+     annars → **ge upp** (`DELETE` kö-raden; `died` är redan loggat).
+   - **Plocka FIFO atomärt:** generera `run_id` (ULID); `UPDATE queue SET status=running,
+     run_id=?, running_since=now WHERE id=? AND status=pending`.
+   - **Starta worker:** spawna processen, sätt `pid` på kö-raden, skriv
+     `INSERT events(kind=started, run_id, agent, task, parent)`.
 3. **Worker:**
    - Kör `claude -p --output-format json` i `agents/<agent>/`, injicerar `task` + relevant registry-kontext.
    - Claude skriver `out.json`.
-   - **Vid lyckat slut, EN transaktion:** `INSERT events(id=run_id, …)` + en `INSERT` per order
-     (`parent=run_id`) + `DELETE` den egna kö-raden.
+   - **Vid slut, EN transaktion:** `INSERT events(kind=finished, run_id, status, cost, summary, parent)`
+     + en `INSERT` per order (`parent=run_id`) + `DELETE` den egna kö-raden. (`status=error` →
+     `finished` med error, inga barn-ordrar.)
 
 ### Krasch-återhämtning
 **PID-liveness, ingen gissad timeout** (körtid spänner 4 s → 1 h). Städaren överst i
 dispatcher-loopen mäter liv direkt. PID-återanvändning hanteras via pid + `running_since`.
-Heartbeat valt bort (workers hänger sig sällan med `claude -p`).
+En död worker loggas som ett `died`-event (**dispatchern** skriver det — den döda kan inte
+rapportera sig själv) och retryas tills `attempts`-taket (default 3), sedan ges upp. Det
+stänger en oändlig krasch-loop på en giftig task som tillförlitligt dödar workern.
+Heartbeat valt bort: `died` fångar bara process*död*, inte *hängning* (levande pid som frusit) —
+hängning är heartbeat-fallet, fortsatt deferred.
 
 ### Felhantering (LÅST default)
-Om `claude` *kör men returnerar fel/skräp* (workern lever): skriv event med `status=error`,
-radera kö-raden, **ingen retry** (annars maler en giftig task för evigt). Larm/retry är ett
-senare, medvetet tillägg.
+Två skilda felmoder, båda visualiserbara:
+- **`finished`(error)** — `claude` *körde men returnerade fel/skräp* (workern lever). Workern
+  skriver `finished` med `status=error`, raderar kö-raden, **ingen retry** (giftig task).
+- **`died`** — worker-*processen* försvann. Dispatchern skriver `died` och retryar till taket
+  (se Krasch-återhämtning). Larm/finmaskig retry-policy är ett senare, medvetet tillägg.
 
 ### Parallellism
 Full parallellism: dispatchern spawnar nästa worker oavsett att en 10-min-körning pågår → en
@@ -242,7 +260,8 @@ Kör dispatchern och se:
 2. Dispatchern plockar den atomärt, startar en worker.
 3. Workern kör `claude -p` i `agents/planner/`, morgon-briefen produceras som markdown-fil
    **med krock-koll över båda kalendrarna**.
-4. En `events`-rad dyker upp (`agent=planner`, `status=success`, `summary` ifylld, `parent=null`).
+4. Två `events`-rader dyker upp för körningen: `started`, sedan `finished`
+   (`agent=planner`, `status=success`, `summary` ifylld, `parent=null`).
 5. Kö-raden är borttagen.
 
 Hela kedjan verifierad → allt annat blir additivt.
@@ -252,16 +271,22 @@ Hela kedjan verifierad → allt annat blir additivt.
 ## Testning
 - **Enhets-/integrationsnära:** kan inserta/läsa rader i `queue` + `events`; typerna i
   `types.ts` delas och kompilerar mot DB-kontraktet.
-- **Atomärt plock:** två dispatcher-pass mot samma `pending`-rad ger exakt en `running`.
-- **Krasch-städ:** en `running`-rad med död `pid` återställs till `pending`.
-- **Felväg:** en roll som returnerar `status=error` ger en error-event och borttagen kö-rad, ingen retry.
+- **Atomärt plock:** två dispatcher-pass mot samma `pending`-rad ger exakt en `running` + ett `started`.
+- **Krasch-städ:** en `running`-rad med död `pid` → ett `died`-event + återställd till `pending` (`attempts++`).
+- **Retry-tak:** en rad som dör `tak` gånger ger ett sista `died` och tas bort, ingen ny retry.
+- **Felväg:** en roll som returnerar `status=error` ger ett `finished`(error) + borttagen kö-rad, ingen retry.
 - **End-to-end:** DoD ovan, körd skarpt med en riktig (men billig) `claude -p`-körning.
 
 ---
 
 ## Medvetet bortvalt nu (lägg till vid behov, additivt)
 - **Dashboard / visualisering** (D3-nodgraf, SSE, Recharts) → byggs *efter* att backenden
-  spottar äkta `events`. Att designa viz mot fejkdata är en känd fälla.
+  spottar äkta `events`. Att designa viz mot fejkdata är en känd fälla. **FE-riktning (förlovad):**
+  wow först (levande konstellation: fasta registry-noder som lyser upp, prickar längs kanter,
+  pulsande `started`-noder), inspektion som debug-panel. **v1 läser bara `events`** i ett fönster,
+  foldar per `run_id`; ensam `started` = pulsa (gissa aldrig "stale" via timeout). Zombie (ensam
+  `started` när dispatchern själv var nere) får åldras ut ur fönstret. `queue`-som-auktoritativ-
+  live-källa + lång-körning-bortom-fönster är en senare uppgradering om det behövs.
 - **`entrepreneur`/CFO-roll** → återanvänder den befintliga `nilsark`-pluginen headless under
   `claude -p` (kopiera inte). Rör inte nuvarande interaktiva `/cfo-run`.
 - **Triage-grind** (Haiku/Ollama "ja/nej" framför dumma adaptrar) → kostnadsoptimering, senare.
