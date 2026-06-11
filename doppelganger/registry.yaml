@@ -1,0 +1,9 @@
+# Source of truth: which agents exist and who may call them.
+# The dispatcher validates queue rows against this file; relevant parts
+# are injected into the agent's prompt. `tools` becomes --allowedTools and
+# `model` becomes --model for claude -p (omit model → CLI default).
+agents:
+  planner:
+    can_be_called_by: [schedule]
+    tools: "Bash(gws calendar:*),Bash(date:*),Read,Write"
+    model: sonnet

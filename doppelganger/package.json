@@ -1,0 +1,26 @@
+{
+  "name": "doppelganger",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Doppelgänger runtime — schedule → queue → dispatcher → worker → claude -p → events",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/*.test.ts"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.4.1",
+    "node-cron": "^4.2.1",
+    "ulid": "^3.0.1",
+    "yaml": "^2.8.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^24.10.1",
+    "typescript": "^5.9.3"
+  }
+}
