@@ -2,6 +2,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { config } from './config.ts';
 import { agentsDir } from './registry.ts';
+import type { AgentConfig, Registry } from './types.ts';
 
 export type AgentSettings = Record<string, unknown>;
 
@@ -18,6 +19,27 @@ export function loadAgentSettings(agent: string, baseDir: string = config.agentS
   const file = path.join(agentDir(agent, baseDir), 'settings.json');
   if (!existsSync(file)) return {};
   return JSON.parse(readFileSync(file, 'utf8')) as AgentSettings;
+}
+
+/**
+ * Per-agent config for the dashboard: registry facts (model, tools, callers)
+ * merged with the agent's on-disk settings.json. Read fresh per request so
+ * edits to settings.json show up without a restart.
+ */
+export function loadAgentConfigs(
+  registry: Registry,
+  baseDir: string = config.agentSettingsDir,
+): Record<string, AgentConfig> {
+  const out: Record<string, AgentConfig> = {};
+  for (const [name, agent] of Object.entries(registry.agents)) {
+    out[name] = {
+      model: agent.model ?? null,
+      tools: agent.tools,
+      callableBy: agent.can_be_called_by,
+      settings: loadAgentSettings(name, baseDir),
+    };
+  }
+  return out;
 }
 
 /** Per-agent private prose (context.md). Opt-in: missing → ''. */
