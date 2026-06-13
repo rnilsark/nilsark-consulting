@@ -10,6 +10,7 @@ export interface ScheduledJob {
 /** The timetable: what the schedule adapter puts on the queue, and when. */
 export const jobs: ScheduledJob[] = [
   { cron: config.morningBriefCron, agent: 'planner', task: 'morning_brief' },
+  { cron: config.financeHeartbeatCron, agent: 'entrepreneur', task: 'heartbeat' },
 ];
 
 export function enqueue(db: Db, job: ScheduledJob): void {

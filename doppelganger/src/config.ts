@@ -20,6 +20,7 @@ interface OperatorConfig {
   maxAttempts: number;
   webPort: number;
   morningBriefCron: string;
+  financeHeartbeatCron: string;
   chatPollCron: string;
   chatMemoryLines: number;
   claudeBin: string;
@@ -32,6 +33,7 @@ const defaults: OperatorConfig = {
   maxAttempts: 3,
   webPort: 4317,
   morningBriefCron: '0 7 * * *',
+  financeHeartbeatCron: '0 8 * * 1',
   chatPollCron: '*/10 * * * * *',
   chatMemoryLines: 12,
   claudeBin: 'claude',
@@ -45,6 +47,7 @@ const envVar: Record<keyof OperatorConfig, string> = {
   maxAttempts: 'DOPPELGANGER_MAX_ATTEMPTS',
   webPort: 'DOPPELGANGER_WEB_PORT',
   morningBriefCron: 'DOPPELGANGER_MORNING_BRIEF_CRON',
+  financeHeartbeatCron: 'DOPPELGANGER_FINANCE_HEARTBEAT_CRON',
   chatPollCron: 'DOPPELGANGER_CHAT_POLL_CRON',
   chatMemoryLines: 'DOPPELGANGER_CHAT_MEMORY_LINES',
   claudeBin: 'DOPPELGANGER_CLAUDE_BIN',
@@ -125,6 +128,7 @@ function resolve(home: string): OperatorConfig {
     maxAttempts: posInt(raw('maxAttempts'), 'maxAttempts'),
     webPort: posInt(raw('webPort'), 'webPort'),
     morningBriefCron: cronExpr(raw('morningBriefCron'), 'morningBriefCron'),
+    financeHeartbeatCron: cronExpr(raw('financeHeartbeatCron'), 'financeHeartbeatCron'),
     chatPollCron: cronExpr(raw('chatPollCron'), 'chatPollCron'),
     chatMemoryLines: posInt(raw('chatMemoryLines'), 'chatMemoryLines'),
     claudeBin: nonEmptyStr(raw('claudeBin'), 'claudeBin'),
