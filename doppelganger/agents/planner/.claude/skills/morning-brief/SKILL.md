@@ -18,15 +18,16 @@ check. The brief and the `out.json` summary are written in **Swedish**.
    ```
    Use `timeMin` = today 00:00 local time, `timeMax` = tomorrow 00:00 local time, as RFC3339 with offset.
 
-2. **Read both calendars** (one `events list` per calendar):
+2. **Read both calendars** (one `events list` per calendar — use the `workCalendar` and
+   `familyCalendar` IDs from your Settings):
    ```bash
-   gws calendar events list --params '{"calendarId":"work@example.com","timeMin":"<RFC3339>","timeMax":"<RFC3339>","singleEvents":true,"orderBy":"startTime"}'
-   gws calendar events list --params '{"calendarId":"family@example.com","timeMin":"<RFC3339>","timeMax":"<RFC3339>","singleEvents":true,"orderBy":"startTime"}'
+   gws calendar events list --params '{"calendarId":"<workCalendar>","timeMin":"<RFC3339>","timeMax":"<RFC3339>","singleEvents":true,"orderBy":"startTime"}'
+   gws calendar events list --params '{"calendarId":"<familyCalendar>","timeMin":"<RFC3339>","timeMax":"<RFC3339>","singleEvents":true,"orderBy":"startTime"}'
    ```
 
-3. **Conflict check across BOTH calendars**:
+3. **Conflict check across BOTH calendars** (same IDs from your Settings):
    ```bash
-   gws calendar freebusy query --json '{"timeMin":"<RFC3339>","timeMax":"<RFC3339>","items":[{"id":"work@example.com"},{"id":"family@example.com"}]}'
+   gws calendar freebusy query --json '{"timeMin":"<RFC3339>","timeMax":"<RFC3339>","items":[{"id":"<workCalendar>"},{"id":"<familyCalendar>"}]}'
    ```
    Flag every time interval where busy blocks overlap — within one calendar or between them.
    All-day events do not count as conflicts, but are mentioned in the brief.

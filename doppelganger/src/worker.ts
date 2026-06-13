@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { config, ensureDirs } from './config.ts';
 import { insertEvent, now, openDb, type Db } from './db.ts';
 import { agentsDir, callableBy, loadRegistry } from './registry.ts';
+import { loadAgentContext, loadAgentSettings, loadSoul } from './settings.ts';
 import type { Order, OutFile, QueueRow, Registry, RunStatus } from './types.ts';
 
 export interface Outcome {
@@ -16,7 +17,7 @@ export interface Outcome {
 
 export function buildPrompt(row: QueueRow, outPath: string, registry: Registry): string {
   const callable = callableBy(registry, row.agent).map((a) => a.name);
-  return [
+  const lines = [
     `You are running headless as the role "${row.agent}" in the Doppelgänger runtime.`,
     ``,
     `## Task`,
@@ -34,7 +35,22 @@ export function buildPrompt(row: QueueRow, outPath: string, registry: Registry):
       callable.length > 0 ? callable.join(', ') : '(none)'
     }.`,
     `Write artifacts (e.g. briefs) under ${config.home} — never into the repo.`,
-  ].join('\n');
+  ];
+
+  // Private context, injected opt-in from $DOPPELGANGER_HOME (never the repo):
+  // shared soul → per-agent context → structured settings. Missing → skipped.
+  const soul = loadSoul();
+  if (soul) lines.push(``, `## Context (shared)`, soul);
+
+  const context = loadAgentContext(row.agent);
+  if (context) lines.push(``, `## Context (${row.agent})`, context);
+
+  const settings = loadAgentSettings(row.agent);
+  if (Object.keys(settings).length > 0) {
+    lines.push(``, `## Settings`, '```json', JSON.stringify(settings, null, 2), '```');
+  }
+
+  return lines.join('\n');
 }
 
 export function runClaude(

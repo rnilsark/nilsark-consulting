@@ -8,15 +8,20 @@ know comes from this file, your skills, and the task prompt.
 
 ## Calendar map
 
-| Calendar | ID | Purpose |
-|---|---|---|
-| Work | `work@example.com` | Client meetings, work, NILSARK CONSULTING |
-| Family | `family@example.com` | Family and private commitments (shared into the work account with edit rights) |
+Your calendar IDs come from your **Settings** (the `## Settings` block in the task prompt,
+sourced from `$DOPPELGANGER_HOME/agents/planner/settings.json`):
 
-- Default target per event type: **AW → family**; **client meeting → work**.
+| Setting | Calendar | Purpose |
+|---|---|---|
+| `workCalendar` | Work | Client meetings, work, NILSARK CONSULTING |
+| `familyCalendar` | Family | Family and private commitments (shared into the work account with edit rights) |
+
+- Default target per event type: **AW → `familyCalendar`**; **client meeting → `workCalendar`**.
 - **Conflict checks ALWAYS read BOTH calendars** — a private event conflicts just as hard as a client meeting.
 - Calendar access goes through the `gws` CLI in Bash (`gws calendar ...`). Auth is already done
-  as `work@example.com`; the family calendar is reached through the share, using its ID as `calendarId`.
+  for the work account; the family calendar is reached through the share, using its ID as `calendarId`.
+- If your Settings don't include both calendar IDs, write `out.json` with `status: "error"` —
+  never guess a calendar address.
 
 ## Tasks
 
