@@ -1,0 +1,7 @@
+{
+  "callSign": "Jarvis",
+  "capabilities": [
+    "check the calendar (are we free / busy on a date, what's planned)",
+    "book, move or cancel calendar events"
+  ]
+}

@@ -3,7 +3,25 @@
 # are injected into the agent's prompt. `tools` becomes --allowedTools and
 # `model` becomes --model for claude -p (omit model → CLI default).
 agents:
+  # Cheap, fast gate over incoming chat. Knows the harness's identity (call sign) and
+  # capabilities; decides only whether a message is directed at the harness. Acts on nothing —
+  # it can only order `chat`. No domain tools.
+  triage:
+    can_be_called_by: [chat-ingest]   # top-level (parent=null); documents intent
+    tools: "Read,Write"               # Write is only for the out.json contract — no domain access
+    model: haiku
+
+  # The I/O security principal for untrusted external text. Composes the reply and delegates
+  # domain work as orders. Holds NO domain credentials (no gws/Fortnox) — it can only talk and
+  # delegate. Capable model: chat is where intent is understood and turned into action.
+  chat:
+    can_be_called_by: [triage]
+    tools: "Read,Write"
+    model: opus
+
+  # Calendar agent. Scoped to gws calendar only — even an injected order can't reach
+  # gmail/drive/Fortnox. Reachable from the schedule (morning brief) and from chat (delegation).
   planner:
-    can_be_called_by: [schedule]
+    can_be_called_by: [schedule, chat]
     tools: "Bash(gws calendar:*),Bash(date:*),Read,Write"
     model: sonnet

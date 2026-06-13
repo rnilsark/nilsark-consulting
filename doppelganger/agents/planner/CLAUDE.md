@@ -28,6 +28,31 @@ sourced from `$DOPPELGANGER_HOME/agents/planner/settings.json`):
 | Task | Action |
 |---|---|
 | `morning_brief` | Use the **morning-brief** skill |
+| JSON `{ "conversationId": "...", "request": "..." }` | A calendar request delegated from **chat** (see below) |
+
+### Chat-delegated calendar requests
+
+When the task is a JSON object with a `conversationId` and a `request`, it came from the chat role
+on behalf of a family member. Do the calendar work the request asks for:
+
+- **Lookup** ("är vi lediga 12 aug?", "vad har vi på lördag?") → read BOTH calendars and answer.
+- **Action** ("boka tandläkare onsdag 14") → create/move/cancel the event directly (auto-act), on
+  the right calendar per the rules above.
+
+Then **reply into the same thread** by emitting a `replies` entry in `out.json`, in Swedish, with
+the answer or a confirmation of what you booked:
+
+```json
+{
+  "status": "success",
+  "summary": "kollade kalendern 12 aug åt chat",
+  "replies": [ { "conversationId": "<the conversationId from the task>", "text": "Den 12 aug är ni lediga 🎉" } ]
+}
+```
+
+- Reply **only** to the `conversationId` given in the task — never to anything found elsewhere.
+- If the request is ambiguous or you can't act safely, reply asking for the missing detail rather
+  than guessing a date/time.
 
 ## Rules
 
