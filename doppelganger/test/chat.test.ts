@@ -209,6 +209,8 @@ test('buildPrompt: injects conversation memory for the chat agent', () => {
   assert.match(prompt, /\[out\] Ja!/);
   // chat may order planner
   assert.match(prompt, /Agents you may order: planner/);
+  // current wall-clock is injected so the agent doesn't have to guess "today"
+  assert.match(prompt, /The current date and time is .+ \(Europe\/Stockholm\)\./);
 });
 
 test('buildPrompt: triage gets the conversationId memory from its JSON task', () => {

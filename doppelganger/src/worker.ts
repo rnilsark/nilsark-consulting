@@ -38,10 +38,21 @@ function conversationIdFor(row: QueueRow): string | null {
   return null;
 }
 
+/** A human-readable wall-clock line in the operator's timezone, so agents don't guess "today". */
+function currentTimeLine(at: Date = new Date()): string {
+  const stamp = new Intl.DateTimeFormat('sv-SE', {
+    timeZone: 'Europe/Stockholm',
+    dateStyle: 'full',
+    timeStyle: 'short',
+  }).format(at);
+  return `The current date and time is ${stamp} (Europe/Stockholm).`;
+}
+
 export function buildPrompt(row: QueueRow, outPath: string, registry: Registry, db?: Db): string {
   const callable = callableBy(registry, row.agent).map((a) => a.name);
   const lines = [
     `You are running headless as the role "${row.agent}" in the Doppelgänger runtime.`,
+    currentTimeLine(),
     ``,
     `## Task`,
     row.task,
