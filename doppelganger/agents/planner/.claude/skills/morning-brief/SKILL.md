@@ -63,7 +63,9 @@ check. The brief and the `out.json` summary are written in **Swedish**.
 6. **Push the brief to the operator** (only if the prompt has an `## Operator` section with a
    conversationId — otherwise skip; the file from step 4 is still the record). Emit ONE `replies`
    entry to that conversationId: a short Swedish WhatsApp version of the brief — not the full
-   markdown. Lead with any gratulationer from step 5, then the day. One merged message, e.g.:
+   markdown. Open with a greeting that fits the **current time** from the prompt (god morgon /
+   god middag / god kväll), then any gratulationer from step 5, then the day. One merged message,
+   e.g. (morning):
 
    ```
    God morgon ☀️
