@@ -3,6 +3,7 @@
 export type QueueStatus = 'pending' | 'running';
 export type EventKind = 'started' | 'finished' | 'died';
 export type RunStatus = 'success' | 'flagged' | 'error';
+export type ChatDirection = 'in' | 'out';
 
 export interface QueueRow {
   id: number;
@@ -51,9 +52,36 @@ export interface AgentConfig {
   settings: Record<string, unknown>;
 }
 
+export interface ChatMessageRow {
+  id: number;
+  channel: string;
+  conversation_id: string;
+  sender: string;
+  direction: ChatDirection;
+  text: string;
+  ts: string;
+}
+
+export interface OutboxRow {
+  id: number;
+  channel: string;
+  conversation_id: string;
+  text: string;
+  status: 'pending' | 'sent';
+  created_at: string;
+}
+
 export interface Order {
   agent: string;
   task: string;
+}
+
+/** A message the worker should deliver back into a conversation via its channel. */
+export interface Reply {
+  conversationId: string;
+  text: string;
+  /** Channel name; omitted → worker resolves it from the conversation's inbound history. */
+  channel?: string;
 }
 
 /** The agent↔worker contract: the file the agent writes in its run directory. */
@@ -61,4 +89,5 @@ export interface OutFile {
   status: RunStatus;
   summary: string;
   orders?: Order[];
+  replies?: Reply[];
 }

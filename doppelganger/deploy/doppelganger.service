@@ -1,5 +1,7 @@
 # Doppelgänger runtime — ONE process: dispatcher + scheduler. No OS cron.
 # Installed as a systemd *user* unit by install.sh (claude/gws auth lives in the user's home).
+# Runtime config (channels, ports, intervals) lives in $DOPPELGANGER_HOME/config.json; env vars
+# below override it. install.sh scaffolds that file from config.example.json on first install.
 [Unit]
 Description=Doppelganger runtime (dispatcher + scheduler)
 After=network-online.target

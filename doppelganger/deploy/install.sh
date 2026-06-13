@@ -12,6 +12,14 @@ command -v gws >/dev/null || { echo "ERROR: gws CLI missing (install + gws auth 
 [ -d "$REPO_DIR/doppelganger/node_modules" ] || (cd "$REPO_DIR/doppelganger" && npm install)
 
 mkdir -p "$UNIT_DIR" "$DOPPELGANGER_HOME"
+
+# Scaffold the host config file once (defaults < config.json < env). Edit it to turn on channels
+# etc.; it lives outside the repo and is the durable place for per-host runtime config.
+if [ ! -f "$DOPPELGANGER_HOME/config.json" ]; then
+  cp "$REPO_DIR/doppelganger/config.example.json" "$DOPPELGANGER_HOME/config.json"
+  echo "Wrote starter config: $DOPPELGANGER_HOME/config.json (edit to set channels, ports, intervals)"
+fi
+
 sed -e "s|{{REPO_DIR}}|$REPO_DIR|g" \
     -e "s|{{NODE_BIN}}|$NODE_BIN|g" \
     -e "s|{{DOPPELGANGER_HOME}}|$DOPPELGANGER_HOME|g" \

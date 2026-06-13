@@ -52,3 +52,17 @@ CREATE TABLE IF NOT EXISTS channel_state (
   channel TEXT PRIMARY KEY,
   cursor  TEXT
 );
+
+-- outbox: replies a (short-lived) worker validated but cannot deliver itself — the live channel
+-- socket lives in the long-lived main process, which drains and sends these. Decouples the
+-- per-run worker from the connection.
+CREATE TABLE IF NOT EXISTS outbox (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  channel         TEXT NOT NULL,
+  conversation_id TEXT NOT NULL,
+  text            TEXT NOT NULL,
+  status          TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'sent')),
+  created_at      TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_outbox_status ON outbox (status);

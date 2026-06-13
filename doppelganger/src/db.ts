@@ -2,7 +2,15 @@ import Database from 'better-sqlite3';
 import { readFileSync } from 'node:fs';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
-import type { ChatDirection, ChatMessageRow, EventKind, EventRow, QueueRow, RunStatus } from './types.ts';
+import type {
+  ChatDirection,
+  ChatMessageRow,
+  EventKind,
+  EventRow,
+  OutboxRow,
+  QueueRow,
+  RunStatus,
+} from './types.ts';
 
 const schemaPath = path.join(import.meta.dirname, '..', 'schema.sql');
 
@@ -119,6 +127,24 @@ export function inboundConversationChannel(db: Db, conversationId: string): stri
     )
     .get(conversationId) as { channel: string } | undefined;
   return row?.channel;
+}
+
+export function insertOutbox(
+  db: Db,
+  reply: { channel: string; conversation_id: string; text: string },
+): void {
+  db.prepare(
+    `INSERT INTO outbox (channel, conversation_id, text, status, created_at)
+     VALUES (?, ?, ?, 'pending', ?)`,
+  ).run(reply.channel, reply.conversation_id, reply.text, now());
+}
+
+export function selectPendingOutbox(db: Db): OutboxRow[] {
+  return db.prepare(`SELECT * FROM outbox WHERE status = 'pending' ORDER BY id`).all() as OutboxRow[];
+}
+
+export function markOutboxSent(db: Db, id: number): void {
+  db.prepare(`UPDATE outbox SET status = 'sent' WHERE id = ?`).run(id);
 }
 
 export function getChannelCursor(db: Db, channel: string): string | null {
