@@ -291,7 +291,23 @@ function tagFor(row) {
   return ['✕', RED];
 }
 
-function renderInspect(agents) {
+function configRows(cfg) {
+  if (!cfg) return '';
+  const rows = [];
+  if (cfg.model) rows.push(['model', cfg.model]);
+  if (cfg.tools) rows.push(['tools', cfg.tools]);
+  if (cfg.callableBy && cfg.callableBy.length) rows.push(['callable by', cfg.callableBy.join(', ')]);
+  for (const [k, v] of Object.entries(cfg.settings || {})) {
+    rows.push([k, typeof v === 'object' ? JSON.stringify(v) : String(v)]);
+  }
+  if (!rows.length) return '';
+  const body = rows
+    .map(([k, v]) => `<div class="cfg-row"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`)
+    .join('');
+  return `<div class="inspect-field"><span class="label">CONFIG</span><div class="cfg">${body}</div></div>`;
+}
+
+function renderInspect(agents, configs) {
   const el = $('inspect');
   const agent = agents.find((a) => a.name === state.selected);
   if (!agent) {
@@ -318,6 +334,7 @@ function renderInspect(agents) {
     `<div class="inspect-field"><span class="label">TASK</span><span class="value">${esc(agent.task)}</span></div>` +
     `<div class="inspect-field"><span class="label">SUMMARY</span><span class="value soft">${esc(summary)}</span></div>` +
     `<div class="inspect-field"><span class="label">COST / RUN</span><div class="spark">${bars}</div></div>` +
+    configRows(configs && configs[agent.name]) +
     '</div>';
   $('inspect-back').addEventListener('click', () => { state.selected = null; render(); });
 }
@@ -347,7 +364,7 @@ function renderDrawer(data) {
     })
     .join('');
 
-  renderInspect(data.agents);
+  renderInspect(data.agents, data.configs);
 }
 
 $('drawer-bar').addEventListener('click', () => {

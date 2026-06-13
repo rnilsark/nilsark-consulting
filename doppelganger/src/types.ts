@@ -43,6 +43,14 @@ export interface Registry {
   agents: Record<string, Agent>;
 }
 
+/** Per-agent config surfaced to the dashboard: registry facts + on-disk settings.json. */
+export interface AgentConfig {
+  model: string | null;
+  tools: string;
+  callableBy: string[];
+  settings: Record<string, unknown>;
+}
+
 export interface Order {
   agent: string;
   task: string;
