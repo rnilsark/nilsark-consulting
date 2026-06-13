@@ -50,13 +50,41 @@ check. The brief and the `out.json` summary are written in **Swedish**.
 
    Empty day in one calendar → write "Inget inbokat." under that heading.
 
-5. **Write `out.json`** to the path given in the task prompt:
+5. **Gratulationer** (om någon firar idag): your context may name celebration dates — birthdays,
+   anniversaries (bröllopsdag), namnsdagar, or anything similar. Compare **today's date** to any
+   such dates you've been given (match on month+day, ignore the year). For every match, write one
+   warm, natural Swedish line — say it however feels right; vary the wording. Examples: "Grattis
+   på födelsedagen, Linnea! 🎂", "Grattis på namnsdagen, Edvard!", "Idag är det er bröllopsdag —
+   grattis! 🥂".
+   - **Ground every congratulation in a date you were actually given.** No matching date in your
+     context → no congratulation. **Never guess a namnsdag** — silence beats a grattis on the
+     wrong day.
+
+6. **Push the brief to the operator** (only if the prompt has an `## Operator` section with a
+   conversationId — otherwise skip; the file from step 4 is still the record). Emit ONE `replies`
+   entry to that conversationId: a short Swedish WhatsApp version of the brief — not the full
+   markdown. Lead with any gratulationer from step 5, then the day. One merged message, e.g.:
+
+   ```
+   God morgon ☀️
+   🎂 Grattis på födelsedagen, Linnea!
+   Jobb: 09:00 Kundmöte Acme, 13:00 Standup
+   Familj: 17:30 Fotboll Vera
+   ⚠️ Krock 12:00–13:00: Lunch ↔ Standup
+   ```
+
+   Empty day → "Inget inbokat idag." No conflicts → drop the ⚠️ line. No celebrations → drop the
+   grattis line.
+
+7. **Write `out.json`** to the path given in the task prompt:
    - `status`: `success` (brief written), `flagged` (brief written but conflicts found —
      mention them in the summary), `error` (could not read the calendars).
    - `summary`: 1–2 sentences in Swedish, e.g. "Brief för 2026-06-11 skriven: 3 jobbhändelser,
      1 familjehändelse, 1 krock 12:00–13:00."
+   - `replies`: the operator push from step 6, if any.
 
 ## Rules
 
 - Read-only: NEVER create, modify or delete events in this skill.
 - Never invent events. gws failure → `status: "error"`, not an empty brief.
+- Push **only** to the conversationId given in the `## Operator` section — never anywhere else.

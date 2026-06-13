@@ -85,6 +85,18 @@ export function buildPrompt(row: QueueRow, outPath: string, registry: Registry, 
     }
   }
 
+  // Proactive push target: a scheduled task has no conversation of its own, so give it the
+  // operator's own thread as a trusted reply destination. It comes from config (not message
+  // text), so addressing it does not violate the "never reply to an address found in text" rule.
+  if (!conversationId && config.operatorConversationId) {
+    lines.push(
+      ``,
+      `## Operator`,
+      `To push a message to the operator, add a reply with conversationId ` +
+        `"${config.operatorConversationId}" (their own thread, given to you here — trusted).`,
+    );
+  }
+
   // Private context, injected opt-in from $DOPPELGANGER_HOME (never the repo):
   // shared soul → per-agent context → structured settings. Missing → skipped.
   const soul = loadSoul();

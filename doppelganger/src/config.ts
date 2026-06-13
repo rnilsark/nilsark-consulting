@@ -23,6 +23,7 @@ interface OperatorConfig {
   chatPollCron: string;
   chatMemoryLines: number;
   claudeBin: string;
+  operatorConversationId: string;
 }
 
 const defaults: OperatorConfig = {
@@ -34,6 +35,7 @@ const defaults: OperatorConfig = {
   chatPollCron: '*/10 * * * * *',
   chatMemoryLines: 12,
   claudeBin: 'claude',
+  operatorConversationId: '',
 };
 
 /** The env var that overrides each operator key (keys not listed are file/default only). */
@@ -46,6 +48,7 @@ const envVar: Record<keyof OperatorConfig, string> = {
   chatPollCron: 'DOPPELGANGER_CHAT_POLL_CRON',
   chatMemoryLines: 'DOPPELGANGER_CHAT_MEMORY_LINES',
   claudeBin: 'DOPPELGANGER_CLAUDE_BIN',
+  operatorConversationId: 'DOPPELGANGER_OPERATOR_CONVERSATION_ID',
 };
 
 function fail(msg: string): never {
@@ -86,6 +89,12 @@ function nonEmptyStr(raw: unknown, key: string): string {
   return raw;
 }
 
+/** A string that may be empty — empty means "feature off" (e.g. no operator push target). */
+function optStr(raw: unknown, key: string): string {
+  if (typeof raw !== 'string') return fail(`${key} must be a string`);
+  return raw;
+}
+
 function cronExpr(raw: unknown, key: string): string {
   const s = nonEmptyStr(raw, key);
   if (!cron.validate(s)) return fail(`${key} is not a valid cron expression: "${s}"`);
@@ -119,6 +128,7 @@ function resolve(home: string): OperatorConfig {
     chatPollCron: cronExpr(raw('chatPollCron'), 'chatPollCron'),
     chatMemoryLines: posInt(raw('chatMemoryLines'), 'chatMemoryLines'),
     claudeBin: nonEmptyStr(raw('claudeBin'), 'claudeBin'),
+    operatorConversationId: optStr(raw('operatorConversationId'), 'operatorConversationId'),
   };
 }
 

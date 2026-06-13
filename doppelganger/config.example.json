@@ -6,5 +6,6 @@
   "morningBriefCron": "0 7 * * *",
   "chatPollCron": "*/10 * * * * *",
   "chatMemoryLines": 12,
-  "claudeBin": "claude"
+  "claudeBin": "claude",
+  "operatorConversationId": ""
 }
