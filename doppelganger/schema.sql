@@ -32,3 +32,23 @@ CREATE INDEX IF NOT EXISTS idx_events_run_id ON events (run_id);
 CREATE INDEX IF NOT EXISTS idx_events_ts     ON events (ts);
 CREATE INDEX IF NOT EXISTS idx_events_agent  ON events (agent);
 CREATE INDEX IF NOT EXISTS idx_events_parent ON events (parent);
+
+-- chat_messages: human↔harness conversation log + the chat agent's memory source.
+-- Channel-agnostic; conversation_id/sender are opaque strings only the channel understands.
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  channel         TEXT NOT NULL,
+  conversation_id TEXT NOT NULL,
+  sender          TEXT NOT NULL,
+  direction       TEXT NOT NULL CHECK (direction IN ('in', 'out')),
+  text            TEXT NOT NULL,
+  ts              TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_messages_conversation ON chat_messages (conversation_id, ts);
+
+-- channel_state: per-channel poll cursor so the ingest adapter only reads new messages.
+CREATE TABLE IF NOT EXISTS channel_state (
+  channel TEXT PRIMARY KEY,
+  cursor  TEXT
+);
