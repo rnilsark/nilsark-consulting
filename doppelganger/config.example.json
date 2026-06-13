@@ -4,6 +4,7 @@
   "maxAttempts": 3,
   "webPort": 4317,
   "morningBriefCron": "0 7 * * *",
+  "financeHeartbeatCron": "0 8 * * 1",
   "chatPollCron": "*/10 * * * * *",
   "chatMemoryLines": 12,
   "claudeBin": "claude",

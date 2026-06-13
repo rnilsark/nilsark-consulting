@@ -25,3 +25,15 @@ agents:
     can_be_called_by: [schedule, chat]
     tools: "Bash(gws calendar:*),Bash(date:*),Read,Write"
     model: sonnet
+
+  # The entrepreneur: the credentialed finance worker, cron-driven. Self-contained — its finance
+  # logic lives in its own local .claude/skills (vendored; no reach into the nilsark plugin or any
+  # repo path), and its config comes from its injected `## Settings` (no config-file reads). Runs the
+  # autonomous-safe finance heartbeat: collect/classify/upload, bank matching, payment refresh,
+  # anomaly scan, month-close DRAFTS, and the todo. Reachable only from the schedule (the cron).
+  # Tools are scoped to finance: read-only Gmail + the DRAFT form only. Bare `gws gmail +send` and
+  # broad `Bash` are deliberately ABSENT — a malicious email cannot make it transmit or pay.
+  entrepreneur:
+    can_be_called_by: [schedule]
+    tools: "Bash(gws gmail users:*),Bash(gws gmail +send --draft:*),Bash(gws drive:*),Bash(date:*),Bash(jq:*),Bash(python3:*),Bash(mkdir:*),Bash(mv:*),Bash(cd:*),Read,Write,Edit,Skill"
+    model: sonnet
