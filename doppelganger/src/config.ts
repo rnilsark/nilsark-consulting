@@ -12,7 +12,7 @@ import path from 'node:path';
 //
 // DOPPELGANGER_HOME is the one exception: it's env-only, because it *locates* the config file.
 
-const KNOWN_CHANNELS = ['stub', 'whatsapp'] as const;
+const KNOWN_CHANNELS = ['stub', 'whatsapp', 'imessage'] as const;
 
 interface OperatorConfig {
   channels: string[];
@@ -26,6 +26,9 @@ interface OperatorConfig {
   allowedSenders: string[];
   claudeBin: string;
   operatorConversationId: string;
+  imessageServerUrl: string;
+  imessagePassword: string;
+  imessagePollMs: number;
 }
 
 const defaults: OperatorConfig = {
@@ -40,6 +43,9 @@ const defaults: OperatorConfig = {
   allowedSenders: [],
   claudeBin: 'claude',
   operatorConversationId: '',
+  imessageServerUrl: '',
+  imessagePassword: '',
+  imessagePollMs: 5000,
 };
 
 /** The env var that overrides each operator key (keys not listed are file/default only). */
@@ -55,6 +61,9 @@ const envVar: Record<keyof OperatorConfig, string> = {
   allowedSenders: 'DOPPELGANGER_ALLOWED_SENDERS',
   claudeBin: 'DOPPELGANGER_CLAUDE_BIN',
   operatorConversationId: 'DOPPELGANGER_OPERATOR_CONVERSATION_ID',
+  imessageServerUrl: 'DOPPELGANGER_IMESSAGE_SERVER_URL',
+  imessagePassword: 'DOPPELGANGER_IMESSAGE_PASSWORD',
+  imessagePollMs: 'DOPPELGANGER_IMESSAGE_POLL_MS',
 };
 
 function fail(msg: string): never {
@@ -148,6 +157,9 @@ function resolve(home: string): OperatorConfig {
     allowedSenders: strList(raw('allowedSenders'), 'allowedSenders'),
     claudeBin: nonEmptyStr(raw('claudeBin'), 'claudeBin'),
     operatorConversationId: optStr(raw('operatorConversationId'), 'operatorConversationId'),
+    imessageServerUrl: optStr(raw('imessageServerUrl'), 'imessageServerUrl'),
+    imessagePassword: optStr(raw('imessagePassword'), 'imessagePassword'),
+    imessagePollMs: posInt(raw('imessagePollMs'), 'imessagePollMs'),
   };
 }
 

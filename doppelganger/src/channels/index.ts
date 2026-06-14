@@ -1,4 +1,5 @@
 import { config } from '../config.ts';
+import { makeImessageChannel } from './imessage.ts';
 import { makeStubChannel } from './stub.ts';
 import { makeWhatsappChannel } from './whatsapp.ts';
 import type { Channel } from './types.ts';
@@ -20,6 +21,12 @@ function makeChannel(name: string): Channel | undefined {
       return makeStubChannel(config.stubInbox, config.stubOutbox);
     case 'whatsapp':
       return makeWhatsappChannel(config.whatsappAuthDir);
+    case 'imessage':
+      return makeImessageChannel({
+        serverUrl: config.imessageServerUrl,
+        password: config.imessagePassword,
+        pollMs: config.imessagePollMs,
+      });
     default:
       return undefined;
   }

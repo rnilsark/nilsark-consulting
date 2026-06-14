@@ -8,5 +8,8 @@
   "chatPollCron": "*/10 * * * * *",
   "chatMemoryLines": 12,
   "claudeBin": "claude",
-  "operatorConversationId": ""
+  "operatorConversationId": "",
+  "imessageServerUrl": "",
+  "imessagePassword": "",
+  "imessagePollMs": 5000
 }
