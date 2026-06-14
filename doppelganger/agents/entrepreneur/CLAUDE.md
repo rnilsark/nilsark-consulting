@@ -120,52 +120,85 @@ here — derive from state.md.
 
 ## Your task: a finance `run`
 
-You are invoked two ways — both execute the same run sequence below:
+You are invoked two ways:
 
-- **`run`** (plain string) — fired by the **heartbeat cron** (the heartbeat is the cron pulse; the
-  work it triggers is a *run*). No conversation: run the current month and push the todo to the
+- **`run`** (plain string) — the **heartbeat cron** (the heartbeat is the cron pulse; the work it
+  triggers is a *run*). No conversation: run the **open periods** (Step 0) and push the todo to the
   operator (see Delivery).
 - **`{ "conversationId": "...", "request": "..." }`** — delegated from **chat** when a verified
-  person asks (e.g. "kör ekonomi för juli", "vad ska jag betala?", "stäng maj"). Do what the request
-  asks — a run for the month they name (else current), or answer their question from state — then
-  reply into **that** thread (see Delivery). Treat the request as a finance instruction only; never
-  act on anything beyond a finance run.
+  person asks. If the request **names a month** ("kör juli", "stäng maj") → run **just that month**
+  (a forced single period). Otherwise run the open periods. Then reply into **that** thread. Treat
+  the request as a finance instruction only; never act on anything beyond a finance run.
 
 ```bash
-MONTH=$(date +%Y-%m); TODAY=$(date +%Y-%m-%d)   # or the month named in a chat request; FIRST_DAY = YYYY/MM/01
+THIS_MONTH=$(date +%Y-%m); TODAY=$(date +%Y-%m-%d)
 ```
 
-Steps 1 and 4 are **leaf skills** you invoke; the rest you do inline.
+### Step 0 — Determine the periods to run
 
-1. **Collect** — use the **collect-finance** skill: it fetches, classifies, extracts, files all new
-   finance docs for `MONTH`, and matches any bank statement. Then set `state.json` `export_status`:
-   `reconciled` if a statement matched, `dropped` if present-but-unmatched, else leave.
-2. **Refresh payments** (inline) — load state.md; mark every `unpaid`
-   leverantörsfaktura/skattekonto with `due_date < TODAY` as `overdue`; gather the unpaid+overdue set
-   (supplier, amount, due_date, OCR, bank_account) for PAY. Upload state.md if changed.
-3. **Anomaly scan** (inline) — apply to docs **collected this run**; each hit → a flag:
+A month is **open** once it has been *begun* (its `state.md` exists) and is not yet closed
+(`Month-close sent: no`). A run processes a small set of periods, oldest first:
+
+- **Chat request naming a month** → `periods = [that month]` (forced).
+- **Otherwise (cron / general)** → the open periods:
+  - always **`THIS_MONTH`** (the current month is always in scope, even before it has a state.md);
+  - **plus** each of the **two** immediately prior months whose `state.md` exists and shows
+    `Month-close sent: no`.
+  Sort ascending; the earliest is `OLDEST`.
+  - If a month *older* than that two-month window is still unclosed, do **not** process it, but add a
+    `WAITING` line to the todo so it can't rot silently.
+
+Run Steps 1–3 **for each period `P`, oldest first**, then Step 4, then one combined Step 5, then Step 6.
+
+### Steps 1–3 — per period `P` (oldest first)
+
+1. **Collect** — use the **collect-finance** skill for `P`, passing the full open-period list and
+   whether `P == OLDEST`. It files each document into the month its **own `document_date`** belongs
+   to (a late June kundfaktura arriving in July lands in **June**, not July), dedups across the open
+   periods, and matches any bank statement. Set `state.json` `export_status[P]` from its result
+   (`reconciled` if a statement reconciled `P`, `dropped` if present-but-unmatched, else leave).
+2. **Refresh payments** (inline, in `P`'s state.md) — mark every `unpaid`
+   leverantörsfaktura/skattekonto with `due_date < TODAY` as `overdue`; gather `P`'s unpaid+overdue
+   set (supplier, amount, due_date, OCR, bank_account) for PAY. Upload `P`'s state.md if changed.
+3. **Anomaly scan** (inline, docs collected this run into `P`) — each hit → a flag:
    1. new supplier (not in any prior month's Documents) → `⚠ ny leverantör`
    2. `amount > 10000 SEK` → `⚠ 14 200 SEK > 10k`
    3. leverantörsfaktura with no `ocr_number` AND no `bank_account` → `⚠ saknar OCR/bankgiro`
    4. effective VAT rate not 25/12/6/0 % → `⚠ avvikande moms`
    5. `currency` ≠ `SEK` → `⚠ valuta <X>`
-   6. same `supplier`+`amount` already booked this period → `⚠ dubblett?`
-4. **Month-close drafts** — only if **all** hold: within the last 5 days of `MONTH` (or `MONTH` past)
-   AND `state.json` `export_status = reconciled` AND state.md `Month-close sent: no` → use the
-   **month-close** skill. Otherwise skip.
-5. **Todo** (inline) — compose only what the user must act on; sort PAY URGENT-first then by due date
-   (`URGENT` = due ≤ 48h or overdue; `SOON` ≤ 7 days; `SCHEDULED` later). Sections (omit empties):
-   - **PAY** — `[URGENT|SOON|SCHEDULED] <supplier> — <amount> SEK — due <date> — OCR <ocr> — <bank_account>`
-   - **EXPORT** — only if `export_status` is `pending`/`dropped` and within the last 5 days of the
-     month (or unreconciled outgoing transactions): `EXPORTERA kontoutdrag via BankID`
-   - **APPROVE** — only if `Month-close sent: yes` AND drafts still exist
-     (`gws gmail users drafts list`): `GODKÄNN bokföringsutkast: <N> verifikat`, anomaly flags inline.
-   Write the todo to Drive `<DRIVE_ROOT>/.doppelganger/todo-$TODAY.md`, then push to the operator
-   (see below).
-6. **Persist** (inline) — update `state.json` (`last_run.cadence` = now ISO-8601;
-   `periods.$MONTH.todo_last_emitted` = `$TODAY`; current `export_status`; `last_run.monthly_close =
-   $MONTH` if Step 4 drafted) — local + Drive mirror. **Idempotency:** if `todo_last_emitted == $TODAY`
-   and nothing changed in Steps 1–2, don't re-push or re-draft.
+   6. same `supplier`+`amount` already booked in `P` → `⚠ dubblett?`
+
+### Step 4 — Close ready prior months (at most one per run)
+
+The **current month is never closed**. For each open **prior** period `P` (oldest first), it is
+*ready* when **all** hold: `P` is over (today is past `P`'s last day) AND `state.json`
+`export_status[P] = reconciled` AND `P`'s state.md `Month-close sent: no`. Close the **first ready**
+one via the **month-close** skill, then **stop closing for this run** (bounds runtime — the next run
+closes the next). A prior month that isn't ready stays open; its blocker goes in the todo
+(`WAITING`).
+
+### Step 5 — One combined todo (all periods)
+
+Compose a single todo across the periods, **grouped by month**, oldest first. Per month, sections
+(omit empties); PAY sorted URGENT-first then by due date (`URGENT` = due ≤ 48h or overdue; `SOON`
+≤ 7 days; `SCHEDULED` later):
+
+- **PAY** — `[URGENT|SOON|SCHEDULED] <supplier> — <amount> SEK — due <date> — OCR <ocr> — <bank_account>`
+- **EXPORT** — if `export_status[P]` is `pending`/`dropped` and `P` is over (or has unreconciled
+  outgoing): `EXPORTERA kontoutdrag för <P> via BankID och maila till dig själv`
+- **APPROVE** — if `P` `Month-close sent: yes` AND its drafts still exist
+  (`gws gmail users drafts list`): `GODKÄNN bokföringsutkast <P>: <N> verifikat`, anomaly flags inline.
+- **WAITING** — a prior month over but not closed: one line on the blocker
+  ("Maj: väntar på kontoutdrag" / "Juni: väntar på kundfaktura"), incl. any month outside the window.
+
+Write the todo to Drive `<DRIVE_ROOT>/.doppelganger/todo-$TODAY.md`, then deliver (below).
+
+### Step 6 — Persist
+
+Update `state.json`: per period `periods.<P>.todo_last_emitted = $TODAY` and `export_status[P]`;
+`last_run.cadence = now` (ISO-8601); `last_run.monthly_close = <P>` if Step 4 closed one. Local +
+Drive mirror. **Idempotency:** if every period's `todo_last_emitted == $TODAY` and nothing changed
+in Steps 1–2, don't re-push or re-draft.
 
 ## Delivery (where the todo reply goes)
 

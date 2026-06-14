@@ -3,15 +3,18 @@ name: collect-finance
 description: Collect all new finance documents for a month — list the inbox, dedup, download attachments, classify + extract fields, file to Drive, and match any bank statement against unpaid invoices. Self-contained leaf skill; invokes no other skill. Follows the State contract in the agent context for the state.md schema and Drive I/O. Stops before any payment, draft, or send.
 ---
 
-# Collect finance (month)
+# Collect finance (period)
 
-Fetch, classify, and file every new finance attachment for the current month. All
-classification/extraction/matching rules are inlined here. For the **state.md schema** and the
-**Drive read/write cycle**, follow the *State contract* in your agent context (CLAUDE.md) — do not
-invoke another skill.
+Fetch, classify, and file new finance attachments for the period `MONTH` the agent gives you,
+**filing each document into the month its own `document_date` belongs to** (so a late June invoice
+that arrives in July lands in June). All classification/extraction/matching rules are inlined here.
+For the **state.md schema** and the **Drive read/write cycle**, follow the *State contract* in your
+agent context (CLAUDE.md) — do not invoke another skill.
 
-Context you already have: `MONTH` (YYYY-MM), `DRIVE_ROOT`, `STAGING_DIR`. Derive `FIRST_DAY` =
-`YYYY/MM/01`. Same auth guard as the State contract.
+Context the agent gives you: `MONTH` (the period being collected, YYYY-MM); the **open-period list**
+(the other months in this run); whether `MONTH` is the **OLDEST** open period; plus `DRIVE_ROOT` and
+`STAGING_DIR`. Derive `FIRST_DAY` = `YYYY/MM/01` of `MONTH`. Same auth guard as the State contract.
+The agent runs the periods oldest-first, so when this pass runs, earlier open periods are already done.
 
 ```bash
 mkdir -p "$STAGING_DIR/$MONTH" "$STAGING_DIR/.state"
@@ -31,8 +34,10 @@ gws gmail users messages list --params '{"userId":"me","q":"has:attachment in:in
 ## Step 3 — Per message-id: dedup + download
 
 For each id:
-- **Dedup** (per the contract): skip if all its rows are `classified`/`skipped — …`; reprocess if any
-  `downloaded`/`error`.
+- **Dedup (across open periods):** skip the message if it is already `classified`/`skipped — …` in
+  `MONTH`'s state.md **or in any other open period's state.md** — reprocess only if its rows are
+  `downloaded`/`error`. (A bank statement sits in several periods' `after:` windows; the cross-period
+  check ensures the earlier pass that already handled it isn't repeated here.)
 - **Metadata:** `gws gmail users messages get --params '{"userId":"me","id":"<id>"}' --format json` →
   `from`, `date`, `subject`, attachment parts (parts with a non-empty `filename`, `mimeType` not
   `multipart/*`).
@@ -53,6 +58,11 @@ with a running balance (`Bokfört saldo`), an account number, and a Handelsbanke
 (`Kontoutdrag`/`Kontohändelser`/`Transaktioner`). Contrast: an invoice/receipt has one supplier, one
 total, usually an OCR/förfallodatum. If it is a statement, **match it** (don't classify as a document):
 
+- **Period routing:** a statement belongs to the month of its transactions, not to whichever pass
+  first sees it. Determine its month from the transaction dates. If that month `!= MONTH`, **skip it
+  in this pass** (the matching pass owns it; cross-period dedup prevents double-processing) — unless
+  `MONTH` is the OLDEST open period and the statement predates the window, in which case process it
+  here. Otherwise continue:
 - Parse each row → `{date, description (Referens), amount (signed), reference/OCR}`. Normalize Swedish
   numbers (strip space thousands-separators, comma→dot).
 - Invoice list: current-month `leverantörsfaktura`/`skattekonto` rows with `payment_status`
@@ -69,7 +79,7 @@ total, usually an OCR/förfallodatum. If it is a statement, **match it** (don't 
 - Set current-month matches to `payment_status = paid`. Record every transaction in the Bank Statement
   Transactions table (dedup identical date+amount+description). Ignore incoming (amount > 0). A bulk
   payment matching multiple invoices → flag for review, don't auto-assign.
-- Archive the statement to the `.doppelganger/` folder; this run reconciles the export.
+- Archive the statement to `MONTH`'s `.doppelganger/` folder; this reconciles `MONTH`'s export.
 
 ## Step 5 — Document branch (classify + extract)
 
@@ -94,12 +104,18 @@ For each non-statement attachment, **Read** the PDF, then:
   betala"/"Totalt inkl. moms"); `currency` (default `SEK`); `vat_amount` (sum all VAT rows). For
   leverantörsfaktura also: `due_date` (Förfallodatum, ISO), `ocr_number` (exact digits), `bank_account`
   (`BG XXXXXX-X`/`PG XXXXX-X`, keep prefix). `document_date` (own date, ISO; blank if unreadable).
-- **Future-month skip:** `DOC_MONTH = document_date[0:7]` (else `MONTH`). `DOC_MONTH > MONTH` → don't
-  upload/add a row; set the Processed Gmail row `skipped — future month`. `DOC_MONTH <= MONTH` → file
-  in `MONTH`.
-- **File it:** upload to the type's subfolder (contract folder map), capture `drive_file_id`, append
-  the Documents row, set `payment_status` (`unpaid` for leverantörsfaktura/skattekonto, else `n/a`) and
-  `fortnox_sent = no`, and flip the Processed Gmail row `downloaded` → `classified`.
+- **Route by document_date — does this doc belong to `MONTH`?** `DOC_MONTH = document_date[0:7]`
+  (else `MONTH`). File it in `MONTH` **only if** `DOC_MONTH == MONTH`, **or** `MONTH` is the OLDEST
+  open period and `DOC_MONTH < MONTH` (a doc predating the whole window — file here and add the
+  anomaly flag `⚠ sen post (daterad <DOC_MONTH>)`). Otherwise **skip in this pass**:
+  - `DOC_MONTH > MONTH` (a later open period, or genuinely future) → set the Processed Gmail row
+    `skipped — future month`; the month it belongs to files it (a later pass this run, or a future run).
+  - `DOC_MONTH < MONTH` and `MONTH` is **not** the oldest → an earlier open period already owns it
+    (its pass ran first this run); leave it — the cross-period dedup keeps it from being double-filed.
+- **File it (when it belongs to `MONTH`):** upload to the type's subfolder (contract folder map),
+  capture `drive_file_id`, append the Documents row, set `payment_status` (`unpaid` for
+  leverantörsfaktura/skattekonto, else `n/a`) and `fortnox_sent = no`, and flip the Processed Gmail
+  row `downloaded` → `classified`.
 
 ## Step 6 — Persist + report
 
