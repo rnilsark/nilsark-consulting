@@ -1,8 +1,9 @@
 name: doppelganger release
 
-# Trunk-based: every push to main that touches the runtime is a release candidate.
-# Gates (typecheck + tests) run on a clean checkout; only if they pass do we cut an
-# immutable CalVer tag (YYYY.N) and advance the `stable` branch the prod box follows.
+# Trunk-based. Every push to main that touches the runtime runs the gates (typecheck + tests).
+# If they pass we ALWAYS advance the `stable` branch the prod box follows — that's the auto-deploy.
+# A version tag (YYYY.N) is cut only when the commit message carries a [release] marker, so version
+# numbers mean an intentional release rather than "every push".
 on:
   push:
     branches: [main]
@@ -13,7 +14,7 @@ on:
 permissions:
   contents: write
 
-# Serialize releases so the YYYY.N counter can't race between two pushes.
+# Serialize runs so the YYYY.N counter can't race between two pushes.
 concurrency:
   group: doppelganger-release
   cancel-in-progress: false
@@ -42,9 +43,20 @@ jobs:
         working-directory: doppelganger
         run: npm test
 
-      - name: Tag release + advance stable
+      - name: Advance stable (auto-deploy pointer)
         run: |
           set -euo pipefail
+          # Force is safe: stable only ever moves forward to a gated main commit.
+          git push --force origin "HEAD:refs/heads/stable"
+          echo "stable -> $(git rev-parse --short HEAD)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Tag release (only when commit is marked [release])
+        run: |
+          set -euo pipefail
+          if ! git log -1 --pretty=%B | grep -qF '[release]'; then
+            echo "No [release] marker — stable advanced, no version tag." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           YEAR="$(date +%Y)"
@@ -53,7 +65,4 @@ jobs:
           echo "Releasing ${TAG} @ $(git rev-parse --short HEAD)"
           git tag -a "${TAG}" -m "doppelganger ${TAG}"
           git push origin "${TAG}"
-          # Fast-forward the stable branch the prod box follows (force is safe: stable only
-          # ever moves forward to a gated main commit).
-          git push --force origin "HEAD:refs/heads/stable"
-          echo "stable -> $(git rev-parse --short HEAD) (${TAG})" >> "$GITHUB_STEP_SUMMARY"
+          echo "tagged ${TAG} @ $(git rev-parse --short HEAD)" >> "$GITHUB_STEP_SUMMARY"
