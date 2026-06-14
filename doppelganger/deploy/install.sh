@@ -32,3 +32,5 @@ systemctl --user status doppelganger.service --no-pager || true
 echo
 echo "Done. Logs: journalctl --user -u doppelganger -f"
 echo "NOTE: for the unit to survive logout: loginctl enable-linger $USER"
+echo "AUTO-UPDATE: set \"selfUpdateEnabled\": true in $DOPPELGANGER_HOME/config.json to follow the"
+echo "             CI-gated 'stable' branch. Rollback: git push -f origin <good-sha>:stable"

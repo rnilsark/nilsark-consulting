@@ -4,6 +4,7 @@ import { startDispatcher } from './dispatcher.ts';
 import { openDb } from './db.ts';
 import { loadRegistry } from './registry.ts';
 import { startScheduler } from './scheduler.ts';
+import { startSelfUpdate } from './selfupdate.ts';
 import { scaffoldAgentSettings } from './settings.ts';
 import { startWeb } from './web.ts';
 
@@ -29,6 +30,7 @@ if (scaffolded.length > 0) {
 // long-lived process for both inbound (ingest) and outbound (outbox drain). Workers never connect.
 const channels = loadChannels();
 startScheduler(db, channels);
+startSelfUpdate();
 const dispatcher = startDispatcher(db, registry);
 const web = startWeb(db, registry);
 

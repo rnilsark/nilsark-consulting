@@ -11,5 +11,8 @@
   "operatorConversationId": "",
   "imessageServerUrl": "",
   "imessagePassword": "",
-  "imessagePollMs": 5000
+  "imessagePollMs": 5000,
+  "selfUpdateEnabled": false,
+  "selfUpdateCron": "*/5 * * * *",
+  "selfUpdateRef": "stable"
 }

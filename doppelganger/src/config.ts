@@ -29,6 +29,9 @@ interface OperatorConfig {
   imessageServerUrl: string;
   imessagePassword: string;
   imessagePollMs: number;
+  selfUpdateEnabled: boolean;
+  selfUpdateCron: string;
+  selfUpdateRef: string;
 }
 
 const defaults: OperatorConfig = {
@@ -46,6 +49,9 @@ const defaults: OperatorConfig = {
   imessageServerUrl: '',
   imessagePassword: '',
   imessagePollMs: 5000,
+  selfUpdateEnabled: false, // OFF by default — never self-update a dev checkout; prod box opts in.
+  selfUpdateCron: '*/5 * * * *',
+  selfUpdateRef: 'stable',
 };
 
 /** The env var that overrides each operator key (keys not listed are file/default only). */
@@ -64,6 +70,9 @@ const envVar: Record<keyof OperatorConfig, string> = {
   imessageServerUrl: 'DOPPELGANGER_IMESSAGE_SERVER_URL',
   imessagePassword: 'DOPPELGANGER_IMESSAGE_PASSWORD',
   imessagePollMs: 'DOPPELGANGER_IMESSAGE_POLL_MS',
+  selfUpdateEnabled: 'DOPPELGANGER_SELF_UPDATE_ENABLED',
+  selfUpdateCron: 'DOPPELGANGER_SELF_UPDATE_CRON',
+  selfUpdateRef: 'DOPPELGANGER_SELF_UPDATE_REF',
 };
 
 function fail(msg: string): never {
@@ -97,6 +106,13 @@ function posInt(raw: unknown, key: string): number {
     return fail(`${key} must be a positive integer, got ${JSON.stringify(raw)}`);
   }
   return n;
+}
+
+function boolVal(raw: unknown, key: string): boolean {
+  if (typeof raw === 'boolean') return raw;
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  return fail(`${key} must be a boolean (true/false), got ${JSON.stringify(raw)}`);
 }
 
 function nonEmptyStr(raw: unknown, key: string): string {
@@ -160,6 +176,9 @@ function resolve(home: string): OperatorConfig {
     imessageServerUrl: optStr(raw('imessageServerUrl'), 'imessageServerUrl'),
     imessagePassword: optStr(raw('imessagePassword'), 'imessagePassword'),
     imessagePollMs: posInt(raw('imessagePollMs'), 'imessagePollMs'),
+    selfUpdateEnabled: boolVal(raw('selfUpdateEnabled'), 'selfUpdateEnabled'),
+    selfUpdateCron: cronExpr(raw('selfUpdateCron'), 'selfUpdateCron'),
+    selfUpdateRef: nonEmptyStr(raw('selfUpdateRef'), 'selfUpdateRef'),
   };
 }
 

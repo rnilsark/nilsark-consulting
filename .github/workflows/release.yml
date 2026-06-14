@@ -1,0 +1,59 @@
+name: doppelganger release
+
+# Trunk-based: every push to main that touches the runtime is a release candidate.
+# Gates (typecheck + tests) run on a clean checkout; only if they pass do we cut an
+# immutable CalVer tag (YYYY.N) and advance the `stable` branch the prod box follows.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'doppelganger/**'
+      - '.github/workflows/release.yml'
+
+permissions:
+  contents: write
+
+# Serialize releases so the YYYY.N counter can't race between two pushes.
+concurrency:
+  group: doppelganger-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # need full history + tags to compute the next CalVer number
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install
+        working-directory: doppelganger
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: doppelganger
+        run: npm run typecheck
+
+      - name: Test
+        working-directory: doppelganger
+        run: npm test
+
+      - name: Tag release + advance stable
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          YEAR="$(date +%Y)"
+          N="$(( $(git tag -l "${YEAR}.*" | wc -l) + 1 ))"
+          TAG="${YEAR}.${N}"
+          echo "Releasing ${TAG} @ $(git rev-parse --short HEAD)"
+          git tag -a "${TAG}" -m "doppelganger ${TAG}"
+          git push origin "${TAG}"
+          # Fast-forward the stable branch the prod box follows (force is safe: stable only
+          # ever moves forward to a gated main commit).
+          git push --force origin "HEAD:refs/heads/stable"
+          echo "stable -> $(git rev-parse --short HEAD) (${TAG})" >> "$GITHUB_STEP_SUMMARY"
