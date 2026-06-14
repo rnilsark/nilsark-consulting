@@ -24,10 +24,17 @@ export function extractInbound(m: WAMessage): InboundMessage | null {
     typeof m.messageTimestamp === 'number'
       ? new Date(m.messageTimestamp * 1000).toISOString()
       : now();
+  // Resolve the sender's phone-number JID. WhatsApp increasingly addresses by an opaque `@lid`;
+  // the alternate field (remoteJidAlt for DMs, participantAlt in groups) carries the real number
+  // (`<number>@s.whatsapp.net`). Prefer it so the allowlist can match on a phone number; fall back
+  // to the lid/jid we do have.
+  const isGroup = conversationId.endsWith('@g.us');
+  const senderJid = isGroup ? (m.key.participant ?? conversationId) : conversationId;
+  const senderAlt = isGroup ? m.key.participantAlt : m.key.remoteJidAlt;
   return {
     channel: 'whatsapp',
     conversationId,
-    sender: m.key.participant ?? conversationId,
+    sender: senderAlt ?? senderJid,
     text,
     ts,
   };

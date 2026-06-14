@@ -27,7 +27,9 @@ export interface Outcome {
 /** The conversation a row belongs to: chat tasks ARE the id; triage tasks carry it in JSON. */
 function conversationIdFor(row: QueueRow): string | null {
   if (row.agent === 'chat') return row.task;
-  if (row.agent === 'triage') {
+  // triage carries the conversationId in JSON; entrepreneur does too when delegated from chat
+  // (its cron task is the plain string "run", which simply parses to null → no conversation).
+  if (row.agent === 'triage' || row.agent === 'entrepreneur') {
     try {
       const parsed = JSON.parse(row.task) as { conversationId?: string };
       return typeof parsed.conversationId === 'string' ? parsed.conversationId : null;

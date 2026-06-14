@@ -23,6 +23,7 @@ interface OperatorConfig {
   financeHeartbeatCron: string;
   chatPollCron: string;
   chatMemoryLines: number;
+  allowedSenders: string[];
   claudeBin: string;
   operatorConversationId: string;
 }
@@ -36,6 +37,7 @@ const defaults: OperatorConfig = {
   financeHeartbeatCron: '0 8 * * 1',
   chatPollCron: '*/10 * * * * *',
   chatMemoryLines: 12,
+  allowedSenders: [],
   claudeBin: 'claude',
   operatorConversationId: '',
 };
@@ -50,6 +52,7 @@ const envVar: Record<keyof OperatorConfig, string> = {
   financeHeartbeatCron: 'DOPPELGANGER_FINANCE_HEARTBEAT_CRON',
   chatPollCron: 'DOPPELGANGER_CHAT_POLL_CRON',
   chatMemoryLines: 'DOPPELGANGER_CHAT_MEMORY_LINES',
+  allowedSenders: 'DOPPELGANGER_ALLOWED_SENDERS',
   claudeBin: 'DOPPELGANGER_CLAUDE_BIN',
   operatorConversationId: 'DOPPELGANGER_OPERATOR_CONVERSATION_ID',
 };
@@ -104,6 +107,17 @@ function cronExpr(raw: unknown, key: string): string {
   return s;
 }
 
+/** A list of free-form strings: a JSON array, or a comma-separated string via env. Empty allowed. */
+function strList(raw: unknown, key: string): string[] {
+  const arr = Array.isArray(raw)
+    ? raw
+    : typeof raw === 'string'
+      ? raw.split(',').map((s) => s.trim()).filter(Boolean)
+      : fail(`${key} must be an array of strings (or a comma-separated string via env)`);
+  for (const v of arr) if (typeof v !== 'string') return fail(`${key} entries must be strings`);
+  return arr as string[];
+}
+
 function channelList(raw: unknown, key: string): string[] {
   const arr = Array.isArray(raw)
     ? raw
@@ -131,6 +145,7 @@ function resolve(home: string): OperatorConfig {
     financeHeartbeatCron: cronExpr(raw('financeHeartbeatCron'), 'financeHeartbeatCron'),
     chatPollCron: cronExpr(raw('chatPollCron'), 'chatPollCron'),
     chatMemoryLines: posInt(raw('chatMemoryLines'), 'chatMemoryLines'),
+    allowedSenders: strList(raw('allowedSenders'), 'allowedSenders'),
     claudeBin: nonEmptyStr(raw('claudeBin'), 'claudeBin'),
     operatorConversationId: optStr(raw('operatorConversationId'), 'operatorConversationId'),
   };

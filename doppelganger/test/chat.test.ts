@@ -76,6 +76,18 @@ test('ingest: writes inbound chat_messages, enqueues triage, advances cursor', (
   assert.equal(selectPendingFifo(db).length, 1);
 });
 
+test('ingest: allowlist blocks a non-listed sender, passes a listed one', () => {
+  const db = freshDb();
+  const { channel } = memChannel('stub', [
+    { conversationId: 'C1', sender: '46999999999@s.whatsapp.net', text: 'stranger', ts: '2026-06-13T10:00:00Z' },
+    { conversationId: 'C2', sender: '+46736625308', text: 'operator', ts: '2026-06-13T10:01:00Z' },
+  ]);
+  ingestChat(db, new Map([[channel.name, channel]]), ['+46736625308']);
+  const queued = selectPendingFifo(db);
+  assert.equal(queued.length, 1);
+  assert.equal((JSON.parse(queued[0].task) as { conversationId: string }).conversationId, 'C2');
+});
+
 /** A channel that captures sends, for the drainer. */
 function captureChannel(name: string, sent: Array<{ conversationId: string; text: string }>): Channel {
   return {
