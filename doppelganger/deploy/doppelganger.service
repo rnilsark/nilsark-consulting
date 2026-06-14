@@ -9,6 +9,9 @@ After=network-online.target
 [Service]
 Type=simple
 WorkingDirectory={{REPO_DIR}}/doppelganger
+# Self-update apply step (no-op unless selfUpdateEnabled). The leading "-" makes failure tolerable:
+# an offline/failed update must never wedge startup — we just start the current code.
+ExecStartPre=-{{REPO_DIR}}/doppelganger/deploy/update.sh
 ExecStart={{NODE_BIN}} src/index.ts
 Environment=DOPPELGANGER_HOME={{DOPPELGANGER_HOME}}
 Restart=always

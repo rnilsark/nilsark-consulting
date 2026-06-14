@@ -12,6 +12,7 @@ command -v gws >/dev/null || { echo "ERROR: gws CLI missing (install + gws auth 
 [ -d "$REPO_DIR/doppelganger/node_modules" ] || (cd "$REPO_DIR/doppelganger" && npm install)
 
 mkdir -p "$UNIT_DIR" "$DOPPELGANGER_HOME"
+chmod +x "$REPO_DIR/doppelganger/deploy/update.sh"
 
 # Scaffold the host config file once (defaults < config.json < env). Edit it to turn on channels
 # etc.; it lives outside the repo and is the durable place for per-host runtime config.
