@@ -2,8 +2,9 @@ name: doppelganger release
 
 # Trunk-based. Every push to main that touches the runtime runs the gates (typecheck + tests).
 # If they pass we ALWAYS advance the `stable` branch the prod box follows — that's the auto-deploy.
-# A version tag (YYYY.N) is cut only when the commit message carries a [release] marker, so version
-# numbers mean an intentional release rather than "every push".
+# A version tag (YYYY.N) is cut only when the commit message has a line that is exactly [release]
+# (its own line — so merely mentioning it in prose doesn't trigger a tag), so version numbers mean
+# an intentional release rather than "every push".
 on:
   push:
     branches: [main]
@@ -53,8 +54,8 @@ jobs:
       - name: Tag release (only when commit is marked [release])
         run: |
           set -euo pipefail
-          if ! git log -1 --pretty=%B | grep -qF '[release]'; then
-            echo "No [release] marker — stable advanced, no version tag." >> "$GITHUB_STEP_SUMMARY"
+          if ! git log -1 --pretty=%B | grep -qxF '[release]'; then
+            echo "No [release] line — stable advanced, no version tag." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           git config user.name "github-actions[bot]"
