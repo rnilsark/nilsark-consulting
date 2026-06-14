@@ -341,6 +341,7 @@ function renderInspect(agents, configs) {
 
 function renderDrawer(data) {
   $('drawer').classList.toggle('open', state.drawerOpen);
+  $('drawer').classList.toggle('no-selection', !state.selected);
   $('caret').textContent = state.drawerOpen ? '▾' : '▴';
   $('log-count').textContent = `${data.feed.length} EVENTS`;
 
