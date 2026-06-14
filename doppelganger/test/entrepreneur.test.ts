@@ -13,8 +13,8 @@ test('registry: entrepreneur may draft but never bare-send, and has no broad Bas
   assert.ok(!tools.includes('Bash'), 'no standalone broad Bash');
 });
 
-test('registry: entrepreneur is cron-only; the dropped inbox-triage gate is gone', () => {
+test('registry: entrepreneur is reachable from the heartbeat cron and from chat', () => {
   const registry = loadRegistry();
-  assert.deepEqual(registry.agents.entrepreneur.can_be_called_by, ['schedule']);
+  assert.deepEqual(registry.agents.entrepreneur.can_be_called_by, ['schedule', 'chat']);
   assert.equal(registry.agents['inbox-triage'], undefined, 'inbox-triage removed');
 });
