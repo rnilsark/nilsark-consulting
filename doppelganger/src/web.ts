@@ -27,7 +27,12 @@ function parseWindow(value: string | null): WindowKey {
   return value === 'hour' || value === 'today' ? value : 'live';
 }
 
-export function startWeb(db: Db, registry: Registry, port: number = config.webPort): http.Server {
+export function startWeb(
+  db: Db,
+  registry: Registry,
+  port: number = config.webPort,
+  host: string = config.webHost,
+): http.Server {
   const eventsSince = db.prepare(
     `SELECT * FROM events WHERE ts >= ? ORDER BY id DESC LIMIT 500`,
   );
@@ -64,8 +69,8 @@ export function startWeb(db: Db, registry: Registry, port: number = config.webPo
     createReadStream(file).pipe(res);
   });
 
-  server.listen(port, () => {
-    console.log(`[web] dashboard on http://localhost:${port}`);
+  server.listen(port, host, () => {
+    console.log(`[web] dashboard on http://${host}:${port}`);
   });
   return server;
 }

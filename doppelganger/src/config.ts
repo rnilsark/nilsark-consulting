@@ -19,6 +19,7 @@ interface OperatorConfig {
   dispatchIntervalMs: number;
   maxAttempts: number;
   webPort: number;
+  webHost: string;
   morningBriefCron: string;
   financeHeartbeatCron: string;
   chatPollCron: string;
@@ -39,6 +40,9 @@ const defaults: OperatorConfig = {
   dispatchIntervalMs: 5000,
   maxAttempts: 3,
   webPort: 4317,
+  // Bind loopback only by default — never expose the dashboard on the LAN. Put a reverse proxy
+  // (e.g. `tailscale serve`) in front for remote access. Set to "0.0.0.0" only if you mean it.
+  webHost: '127.0.0.1',
   morningBriefCron: '0 7 * * *',
   financeHeartbeatCron: '0 8 * * 1',
   chatPollCron: '*/10 * * * * *',
@@ -60,6 +64,7 @@ const envVar: Record<keyof OperatorConfig, string> = {
   dispatchIntervalMs: 'DOPPELGANGER_DISPATCH_INTERVAL_MS',
   maxAttempts: 'DOPPELGANGER_MAX_ATTEMPTS',
   webPort: 'DOPPELGANGER_WEB_PORT',
+  webHost: 'DOPPELGANGER_WEB_HOST',
   morningBriefCron: 'DOPPELGANGER_MORNING_BRIEF_CRON',
   financeHeartbeatCron: 'DOPPELGANGER_FINANCE_HEARTBEAT_CRON',
   chatPollCron: 'DOPPELGANGER_CHAT_POLL_CRON',
@@ -166,6 +171,7 @@ function resolve(home: string): OperatorConfig {
     dispatchIntervalMs: posInt(raw('dispatchIntervalMs'), 'dispatchIntervalMs'),
     maxAttempts: posInt(raw('maxAttempts'), 'maxAttempts'),
     webPort: posInt(raw('webPort'), 'webPort'),
+    webHost: nonEmptyStr(raw('webHost'), 'webHost'),
     morningBriefCron: cronExpr(raw('morningBriefCron'), 'morningBriefCron'),
     financeHeartbeatCron: cronExpr(raw('financeHeartbeatCron'), 'financeHeartbeatCron'),
     chatPollCron: cronExpr(raw('chatPollCron'), 'chatPollCron'),

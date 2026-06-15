@@ -3,6 +3,7 @@
   "dispatchIntervalMs": 5000,
   "maxAttempts": 3,
   "webPort": 4317,
+  "webHost": "127.0.0.1",
   "morningBriefCron": "0 7 * * *",
   "financeHeartbeatCron": "0 8 * * 1",
   "chatPollCron": "*/10 * * * * *",
