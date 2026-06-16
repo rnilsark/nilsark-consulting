@@ -37,7 +37,7 @@ interface OperatorConfig {
 
 const defaults: OperatorConfig = {
   channels: ['stub'],
-  dispatchIntervalMs: 5000,
+  dispatchIntervalMs: 2000,
   maxAttempts: 3,
   webPort: 4317,
   // Bind loopback only by default — never expose the dashboard on the LAN. Put a reverse proxy
@@ -45,14 +45,14 @@ const defaults: OperatorConfig = {
   webHost: '127.0.0.1',
   morningBriefCron: '0 7 * * *',
   financeHeartbeatCron: '0 8 * * 1',
-  chatPollCron: '*/10 * * * * *',
+  chatPollCron: '*/3 * * * * *',
   chatMemoryLines: 12,
   allowedSenders: [],
   claudeBin: 'claude',
   operatorConversationId: '',
   imessageServerUrl: '',
   imessagePassword: '',
-  imessagePollMs: 5000,
+  imessagePollMs: 3000,
   selfUpdateEnabled: false, // OFF by default — never self-update a dev checkout; prod box opts in.
   selfUpdateCron: '*/5 * * * *',
   selfUpdateRef: 'stable',

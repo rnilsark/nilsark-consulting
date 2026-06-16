@@ -174,6 +174,54 @@ export function readOutcome(outPath: string, cost: number | null, failure: strin
 }
 
 /**
+ * Fast "on it" acks, sent the instant triage escalates a message to chat. The point is a sign of
+ * life: chat (opus) + planner (sonnet) are slow, so a deterministic one-liner bridges the gap and
+ * makes the whole thing feel responsive. Kept in code, not the LLM — instant and free, no extra run.
+ * Variety on purpose: terse, dry, and the occasional silly one, so it never reads like a robot.
+ */
+export const TRIAGE_ACKS = [
+  'Japp, jag kollar.',
+  'Är på det.',
+  'Mottaget — återkommer strax.',
+  'Ett ögonblick, jag fixar det.',
+  'Jajamän, ger mig på det direkt.',
+  'Håll i hatten, jobbar på det. 🫡',
+  'Roger that.',
+  'På saken!',
+  'Mhm, låt mig kika.',
+  'Noterat, jag återkommer.',
+  'Lugn, jag löser det.',
+  'Ska bli — ge mig en sekund.',
+  'Tänker högt en stund, strax tillbaka.',
+  'Okej, gräver i det.',
+];
+
+export function pickAck(acks: string[] = TRIAGE_ACKS): string {
+  return acks[Math.floor(Math.random() * acks.length)];
+}
+
+/**
+ * When triage escalates to chat, drop an instant canned ack into the conversation so the human sees
+ * a fast reply ahead of the (slower) real answer. No-op unless triage actually escalated, and gated
+ * by the same rule as routeReplies: only into a conversation we've heard from. Inserted before the
+ * chat run produces its answer, so the lower outbox id drains first — ack lands ahead of the reply.
+ */
+export function acknowledgeTriage(
+  db: Db,
+  row: QueueRow,
+  outcome: Outcome,
+  ack: () => string = pickAck,
+): void {
+  if (row.agent !== 'triage' || outcome.status === 'error') return;
+  if (!(outcome.orders ?? []).some((o) => o.agent === 'chat')) return;
+  const conversationId = conversationIdFor(row);
+  if (!conversationId) return;
+  const channel = inboundConversationChannel(db, conversationId);
+  if (!channel) return;
+  insertOutbox(db, { channel, conversation_id: conversationId, text: ack() });
+}
+
+/**
  * Queue an agent's replies for delivery by the main process (which owns the live channel socket).
  * The worker is a short-lived per-run process and must NOT hold a channel connection itself.
  * Security: a reply is only queued for a conversation we have received an inbound message from —
@@ -238,6 +286,7 @@ function main(): void {
   const { cost, failure } = runClaude(row, buildPrompt(row, outPath, registry, db), registry);
   const outcome = readOutcome(outPath, cost, failure);
   routeReplies(db, outcome);
+  acknowledgeTriage(db, row, outcome);
   finalize(db, row, outcome);
   console.log(`[worker] finished status=${outcome.status} cost=${outcome.cost ?? '?'} — ${outcome.summary}`);
 }
