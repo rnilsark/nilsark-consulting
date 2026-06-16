@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config, ensureDirs } from './config.ts';
@@ -115,10 +115,26 @@ export function buildPrompt(row: QueueRow, outPath: string, registry: Registry, 
   return lines.join('\n');
 }
 
+/**
+ * Persist the raw `claude -p` output into the run dir so a failed run is diagnosable from
+ * runs/<id>/ alone — `claude.json` carries result, permission_denials, cost and usage; the full
+ * turn-by-turn transcript still lives under ~/.claude/projects. Best-effort: a logging failure must
+ * never mask the actual run outcome.
+ */
+export function saveTranscript(runDir: string, stdout?: string, stderr?: string): void {
+  try {
+    if (stdout) writeFileSync(path.join(runDir, 'claude.json'), stdout);
+    if (stderr && stderr.trim()) writeFileSync(path.join(runDir, 'claude.stderr'), stderr);
+  } catch (err) {
+    console.error(`[worker] failed to save transcript: ${(err as Error).message}`);
+  }
+}
+
 export function runClaude(
   row: QueueRow,
   prompt: string,
   registry: Registry,
+  runDir: string,
 ): { cost: number | null; failure: string | null } {
   const agent = registry.agents[row.agent];
   const args = ['-p', prompt, '--output-format', 'json'];
@@ -131,6 +147,8 @@ export function runClaude(
     maxBuffer: 64 * 1024 * 1024,
     env: { ...process.env, DOPPELGANGER_HOME: config.home },
   });
+
+  saveTranscript(runDir, res.stdout, res.stderr);
 
   if (res.error) return { cost: null, failure: `claude failed to start: ${res.error.message}` };
 
@@ -283,7 +301,7 @@ function main(): void {
   const outPath = path.join(runDir, 'out.json');
 
   console.log(`[worker] run=${row.run_id} agent=${row.agent} task=${row.task}`);
-  const { cost, failure } = runClaude(row, buildPrompt(row, outPath, registry, db), registry);
+  const { cost, failure } = runClaude(row, buildPrompt(row, outPath, registry, db), registry, runDir);
   const outcome = readOutcome(outPath, cost, failure);
   routeReplies(db, outcome);
   acknowledgeTriage(db, row, outcome);

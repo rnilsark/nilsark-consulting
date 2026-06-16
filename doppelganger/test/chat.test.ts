@@ -13,7 +13,9 @@ import {
   selectPendingOutbox,
 } from '../src/db.ts';
 import { drainOutbox } from '../src/outbox.ts';
-import { acknowledgeTriage, buildPrompt, pickAck, readOutcome, routeReplies, TRIAGE_ACKS, type Outcome } from '../src/worker.ts';
+import { acknowledgeTriage, buildPrompt, pickAck, readOutcome, routeReplies, saveTranscript, TRIAGE_ACKS, type Outcome } from '../src/worker.ts';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir as osTmpdir } from 'node:os';
 import type { Channel, InboundMessage } from '../src/channels/types.ts';
 import type { QueueRow, Registry } from '../src/types.ts';
 
@@ -238,6 +240,22 @@ test('acknowledgeTriage: error outcome queues nothing', () => {
   const row = triageRow({ channel: 'stub', conversationId: 'C1', text: 'hi' });
   acknowledgeTriage(db, row, { status: 'error', summary: 'boom', orders: [{ agent: 'chat', task: 'C1' }], cost: null });
   assert.equal(selectPendingOutbox(db).length, 0);
+});
+
+test('saveTranscript: writes claude.json (and stderr when non-empty) into the run dir', () => {
+  const dir = mkdtempSync(path.join(osTmpdir(), 'dg-run-'));
+  saveTranscript(dir, '{"result":"ok","permission_denials":[]}', '  ');
+  assert.equal(readFileSync(path.join(dir, 'claude.json'), 'utf8'), '{"result":"ok","permission_denials":[]}');
+  assert.equal(existsSync(path.join(dir, 'claude.stderr')), false); // whitespace-only stderr skipped
+
+  saveTranscript(dir, '{}', 'boom: gws blocked');
+  assert.equal(readFileSync(path.join(dir, 'claude.stderr'), 'utf8'), 'boom: gws blocked');
+});
+
+test('saveTranscript: no stdout writes nothing and does not throw', () => {
+  const dir = mkdtempSync(path.join(osTmpdir(), 'dg-run-'));
+  saveTranscript(dir, undefined, undefined);
+  assert.equal(existsSync(path.join(dir, 'claude.json')), false);
 });
 
 test('pickAck: always returns a member of the canned list', () => {
