@@ -57,11 +57,14 @@ safe and there is no update-vs-restart race. It fetches the ref named by `selfUp
 `stable`) and, if it moved, force-checks-out and reinstalls. A network failure falls through to
 "start current code" — an offline box never wedges.
 
-Releases are deliberate: pushing to `main` does **not** deploy. Move the `stable` ref to ship.
+**Push to `main` is the deploy.** CI (`.github/workflows/release.yml`) runs typecheck + tests on
+every push touching `doppelganger/**` and, if green, force-advances `stable` to that commit — which
+the box then self-updates to. A version tag (`YYYY.N`) is cut only when the commit body contains a
+line that is exactly `[release]`; that's the only "deliberate" step — version numbers, not the deploy.
 
 ```bash
-git push -f origin <good-sha>:stable    # release (or roll back) by moving the ref
-systemctl --user restart doppelganger   # apply now instead of waiting for the next restart
+systemctl --user restart doppelganger   # apply now instead of waiting for the next poll
+git push -f origin <good-sha>:stable     # roll back by moving stable to an earlier good commit
 ```
 
 > **The deploy scripts must stay executable in git (`100755`).** `update.sh` does a

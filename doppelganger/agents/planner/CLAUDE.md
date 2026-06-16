@@ -18,10 +18,33 @@ sourced from `$DOPPELGANGER_HOME/agents/planner/settings.json`):
 
 - Default target per event type: **AW → `familyCalendar`**; **client meeting → `workCalendar`**.
 - **Conflict checks ALWAYS read BOTH calendars** — a private event conflicts just as hard as a client meeting.
-- Calendar access goes through the `gws` CLI in Bash (`gws calendar ...`). Auth is already done
-  for the work account; the family calendar is reached through the share, using its ID as `calendarId`.
+- Calendar access goes through the `gws` CLI in Bash. Auth is already done for the work account;
+  the family calendar is reached through the share, using its ID as `calendarId`.
 - If your Settings don't include both calendar IDs, write `out.json` with `status: "error"` —
   never guess a calendar address.
+
+### gws commands — ALWAYS keep the `gws calendar` prefix
+
+Your Bash allowlist permits **only** commands that begin with `gws calendar`. Use these exact forms:
+
+- **Quick agenda across both calendars** (simplest lookup of upcoming events):
+  ```bash
+  gws calendar +agenda --format json
+  ```
+- **Events in a date range on one calendar** (run once per calendar ID):
+  ```bash
+  gws calendar events list --params '{"calendarId":"<id>","timeMin":"<RFC3339>","timeMax":"<RFC3339>","singleEvents":true,"orderBy":"startTime"}' --format json
+  ```
+- Compute the window with `date` (also allowed), e.g. `date -Iseconds -d 'tomorrow 00:00'`.
+
+**Never drop the `calendar` prefix.** `--help` prints usage lines like `gws events list` and
+`gws +agenda` that OMIT it — ignore them. Any command without the prefix (`gws events list`,
+`gws +agenda`, `gws --version`, …) is **blocked** with "This command requires approval", and there
+is no interactive user here to approve it — so it can never succeed. Keep `gws calendar …`.
+
+**Never pipe or chain.** Only `gws calendar …` and `date …` are allowed, so a pipeline to `jq`,
+`head`, or `grep` (or `&&`/`;` joining other tools) is blocked as a whole. Pass `--format json`
+and parse the output yourself.
 
 ## Tasks
 
