@@ -28,6 +28,7 @@
   .wordmark-group{display:flex;align-items:baseline;gap:12px;flex:1 1 0;min-width:0;overflow:hidden;}
   .wordmark{font-size:16px;font-weight:700;letter-spacing:5px;color:#2dffa3;text-shadow:0 0 12px rgba(45,255,163,.45);white-space:nowrap;}
   .cursor{font-size:13px;color:#2dffa3;animation:flicker 1.1s steps(1) infinite;flex:0 0 auto;}
+  .build{font-size:9px;letter-spacing:1px;color:rgba(150,210,180,.45);white-space:nowrap;flex:0 1 auto;overflow:hidden;text-overflow:ellipsis;align-self:center;}
   .header-right{display:flex;align-items:center;justify-content:flex-end;gap:22px;flex:1 1 0;min-width:0;}
   .windows{display:flex;gap:4px;flex:0 0 auto;}
   .win-btn{font-family:inherit;font-size:9px;letter-spacing:1px;padding:5px 9px;border:1px solid rgba(45,255,163,.12);background:transparent;color:rgba(150,210,180,.45);cursor:pointer;white-space:nowrap;}
@@ -125,7 +126,7 @@
 <body>
 <div class="app">
   <div class="header">
-    <div class="wordmark-group"><span class="wordmark">DOPPELGÄNGER</span><span class="cursor">█</span></div>
+    <div class="wordmark-group"><span class="wordmark">DOPPELGÄNGER</span><span class="cursor">█</span><span class="build" id="build" title="running build"></span></div>
     <div class="header-right">
       <div class="windows" id="windows"></div>
       <div class="stats">

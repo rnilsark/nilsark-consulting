@@ -10,6 +10,7 @@ import { openDb, type Db } from './db.ts';
 import { project, windowSince, type WindowKey } from './projection.ts';
 import { loadRegistry } from './registry.ts';
 import { loadAgentConfigs } from './settings.ts';
+import { getVersion } from './version.ts';
 import type { EventRow, Registry } from './types.ts';
 
 const webDir = path.join(import.meta.dirname, '..', 'web');
@@ -48,7 +49,7 @@ export function startWeb(
       const state = project(windowEvents, todayEvents, Object.keys(registry.agents));
       const configs = loadAgentConfigs(registry);
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-      res.end(JSON.stringify({ ...state, configs }));
+      res.end(JSON.stringify({ ...state, configs, version: getVersion() }));
       return;
     }
 

@@ -271,6 +271,11 @@ function renderStats(stats) {
   $('stat-active').classList.toggle('dim', stats.active === 0);
 }
 
+function renderVersion(v) {
+  if (!v) return;
+  $('build').textContent = v.date ? `${v.sha} · ${v.date}` : v.sha;
+}
+
 // ---- drawer ------------------------------------------------------------------
 
 function statusWord(st) { return st; }
@@ -382,6 +387,7 @@ function render() {
   if (state.selected && !data.agents.some((a) => a.name === state.selected)) state.selected = null;
   const positions = layout(data.agents.map((a) => a.name));
   renderStats(data.stats);
+  renderVersion(data.version);
   renderNodes(positions, data.agents);
   renderEdges(positions, data.edges);
   renderPackets(positions, data.edges);
