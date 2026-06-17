@@ -5,7 +5,7 @@
   "webPort": 4317,
   "webHost": "127.0.0.1",
   "morningBriefCron": "0 7 * * *",
-  "financeHeartbeatCron": "0 8 * * 1",
+  "financeHeartbeatCron": "0 8 * * *",
   "chatPollCron": "*/3 * * * * *",
   "chatMemoryLines": 12,
   "claudeBin": "claude",
@@ -15,5 +15,7 @@
   "imessagePollMs": 3000,
   "selfUpdateEnabled": false,
   "selfUpdateCron": "*/5 * * * *",
-  "selfUpdateRef": "stable"
+  "selfUpdateRef": "stable",
+  "healthcheckCron": "0 * * * *",
+  "staleRunHours": 30
 }

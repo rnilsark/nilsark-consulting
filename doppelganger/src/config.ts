@@ -33,6 +33,8 @@ interface OperatorConfig {
   selfUpdateEnabled: boolean;
   selfUpdateCron: string;
   selfUpdateRef: string;
+  healthcheckCron: string;
+  staleRunHours: number;
 }
 
 const defaults: OperatorConfig = {
@@ -44,7 +46,7 @@ const defaults: OperatorConfig = {
   // (e.g. `tailscale serve`) in front for remote access. Set to "0.0.0.0" only if you mean it.
   webHost: '127.0.0.1',
   morningBriefCron: '0 7 * * *',
-  financeHeartbeatCron: '0 8 * * 1',
+  financeHeartbeatCron: '0 8 * * *',
   chatPollCron: '*/3 * * * * *',
   chatMemoryLines: 12,
   allowedSenders: [],
@@ -56,6 +58,8 @@ const defaults: OperatorConfig = {
   selfUpdateEnabled: false, // OFF by default — never self-update a dev checkout; prod box opts in.
   selfUpdateCron: '*/5 * * * *',
   selfUpdateRef: 'stable',
+  healthcheckCron: '0 * * * *',
+  staleRunHours: 30,
 };
 
 /** The env var that overrides each operator key (keys not listed are file/default only). */
@@ -78,6 +82,8 @@ const envVar: Record<keyof OperatorConfig, string> = {
   selfUpdateEnabled: 'DOPPELGANGER_SELF_UPDATE_ENABLED',
   selfUpdateCron: 'DOPPELGANGER_SELF_UPDATE_CRON',
   selfUpdateRef: 'DOPPELGANGER_SELF_UPDATE_REF',
+  healthcheckCron: 'DOPPELGANGER_HEALTHCHECK_CRON',
+  staleRunHours: 'DOPPELGANGER_STALE_RUN_HOURS',
 };
 
 function fail(msg: string): never {
@@ -185,6 +191,8 @@ function resolve(home: string): OperatorConfig {
     selfUpdateEnabled: boolVal(raw('selfUpdateEnabled'), 'selfUpdateEnabled'),
     selfUpdateCron: cronExpr(raw('selfUpdateCron'), 'selfUpdateCron'),
     selfUpdateRef: nonEmptyStr(raw('selfUpdateRef'), 'selfUpdateRef'),
+    healthcheckCron: cronExpr(raw('healthcheckCron'), 'healthcheckCron'),
+    staleRunHours: posInt(raw('staleRunHours'), 'staleRunHours'),
   };
 }
 
