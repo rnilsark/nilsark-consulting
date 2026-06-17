@@ -38,6 +38,8 @@ export interface Agent {
   tools: string;
   /** Model the worker passes to `claude -p` (e.g. 'sonnet'). Omitted → CLI default. */
   model?: string;
+  /** Maximum number of concurrent runs for this agent. Omitted → unlimited. */
+  max_concurrency?: number;
 }
 
 export interface Registry {

@@ -78,11 +78,23 @@ function validRow(db: Db, registry: Registry, row: QueueRow): boolean {
 
 /** Pick FIFO atomically and start workers. Never blocks — full parallelism. */
 export function pick(db: Db, registry: Registry, spawnWorker: SpawnWorker = spawnWorkerProcess): void {
+  const runningByAgent = new Map<string, number>();
+  for (const row of selectRunning(db)) {
+    runningByAgent.set(row.agent, (runningByAgent.get(row.agent) ?? 0) + 1);
+  }
+
   for (const row of selectPendingFifo(db)) {
     if (!validRow(db, registry, row)) {
       db.prepare(`DELETE FROM queue WHERE id = ?`).run(row.id);
       continue;
     }
+
+    const agent = registry.agents[row.agent];
+    if (agent?.max_concurrency !== undefined) {
+      const running = runningByAgent.get(row.agent) ?? 0;
+      if (running >= agent.max_concurrency) continue;
+    }
+
     const runId = ulid();
     const res = db
       .prepare(
@@ -90,6 +102,8 @@ export function pick(db: Db, registry: Registry, spawnWorker: SpawnWorker = spaw
       )
       .run(runId, now(), row.id);
     if (res.changes !== 1) continue; // someone else got there first — atomic pick
+
+    runningByAgent.set(row.agent, (runningByAgent.get(row.agent) ?? 0) + 1);
 
     const pid = spawnWorker(row.id, runId);
     db.prepare(`UPDATE queue SET pid = ? WHERE id = ?`).run(pid ?? null, row.id);

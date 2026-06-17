@@ -38,3 +38,4 @@ agents:
     can_be_called_by: [schedule, chat]
     tools: "Bash(gws gmail users:*),Bash(gws gmail +send --draft:*),Bash(gws drive:*),Bash(date:*),Bash(jq:*),Bash(python3:*),Bash(mkdir:*),Bash(mv:*),Bash(cd:*),Read,Write,Edit,Skill"
     model: sonnet
+    max_concurrency: 1
