@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { config } from '../config.ts';
-import { inboundConversationChannel, insertOutbox, lastEntrepreneurSuccess, type Db } from '../db.ts';
+import { insertOutbox, lastEntrepreneurSuccess, operatorPushTarget, type Db } from '../db.ts';
 
 export type AuthPing = () => { ok: boolean; detail: string };
 
@@ -17,16 +17,16 @@ const defaultAuthPing: AuthPing = () => {
 };
 
 function pushAlert(db: Db, text: string): void {
-  if (!config.operatorConversationId) {
-    console.log(`[health] alert (no operatorConversationId configured): ${text}`);
+  if (!config.operatorNumber) {
+    console.log(`[health] alert (no operatorNumber configured): ${text}`);
     return;
   }
-  const channel = inboundConversationChannel(db, config.operatorConversationId);
-  if (!channel) {
-    console.log(`[health] alert (no inbound channel history for operator): ${text}`);
+  const target = operatorPushTarget(db, config.operatorNumber);
+  if (!target) {
+    console.log(`[health] alert (operator has no direct-message thread yet): ${text}`);
     return;
   }
-  insertOutbox(db, { channel, conversation_id: config.operatorConversationId, text });
+  insertOutbox(db, { channel: target.channel, conversation_id: target.conversationId, text });
 }
 
 export function runHealthcheck(db: Db, authPing: AuthPing = defaultAuthPing): void {

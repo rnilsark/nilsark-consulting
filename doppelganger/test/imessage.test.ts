@@ -19,6 +19,7 @@ test('imessage: extracts a plain inbound text message', () => {
     sender: '+46736625308',
     text: 'hej',
     ts: new Date(1_700_000_000_000).toISOString(),
+    isDirect: true, // ";-;" guid → 1:1
   });
 });
 
@@ -49,6 +50,7 @@ test('imessage: group sender is the handle, conversation is the chat guid', () =
   });
   assert.equal(m?.sender, 'mom@icloud.com');
   assert.equal(m?.conversationId, 'iMessage;+;chat123');
+  assert.equal(m?.isDirect, false); // ";+;" guid → group
 });
 
 test('imessage: 1:1 with no handle falls back to the chat guid as sender', () => {

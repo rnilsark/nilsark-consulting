@@ -9,6 +9,7 @@ import {
   insertOutbox,
   now,
   openDb,
+  operatorPushTarget,
   recentChatMessages,
   type Db,
 } from './db.ts';
@@ -88,15 +89,19 @@ export function buildPrompt(row: QueueRow, outPath: string, registry: Registry, 
   }
 
   // Proactive push target: a scheduled task has no conversation of its own, so give it the
-  // operator's own thread as a trusted reply destination. It comes from config (not message
-  // text), so addressing it does not violate the "never reply to an address found in text" rule.
-  if (!conversationId && config.operatorConversationId) {
-    lines.push(
-      ``,
-      `## Operator`,
-      `To push a message to the operator, add a reply with conversationId ` +
-        `"${config.operatorConversationId}" (their own thread, given to you here — trusted).`,
-    );
+  // operator's own DM thread as a trusted reply destination. Derived from the DB (the operator's
+  // most recent direct message), not message text, so addressing it does not violate the "never
+  // reply to an address found in text" rule.
+  if (!conversationId && db && config.operatorNumber) {
+    const target = operatorPushTarget(db, config.operatorNumber);
+    if (target) {
+      lines.push(
+        ``,
+        `## Operator`,
+        `To push a message to the operator, add a reply with conversationId ` +
+          `"${target.conversationId}" (their own thread, given to you here — trusted).`,
+      );
+    }
   }
 
   // Private context, injected opt-in from $DOPPELGANGER_HOME (never the repo):

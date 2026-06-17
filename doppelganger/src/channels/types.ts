@@ -10,6 +10,12 @@ export interface InboundMessage {
   sender: string;
   text: string;
   ts: string;
+  /**
+   * True if this is a direct (1:1) thread with the harness; false/absent for a group. The channel
+   * knows its own format and sets this — consumers must NOT sniff the conversationId. Drives the
+   * "operator DM bypasses triage" gate and marks rows so we can find the operator's own DM thread.
+   */
+  isDirect?: boolean;
 }
 
 export interface PollResult {

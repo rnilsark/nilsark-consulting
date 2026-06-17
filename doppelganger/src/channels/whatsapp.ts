@@ -37,6 +37,7 @@ export function extractInbound(m: WAMessage): InboundMessage | null {
     sender: senderAlt ?? senderJid,
     text,
     ts,
+    isDirect: !isGroup,
   };
 }
 

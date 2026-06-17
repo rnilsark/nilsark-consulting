@@ -20,6 +20,7 @@ export function makeStubChannel(inboxPath: string, outboxPath: string): Channel 
         sender: string;
         text: string;
         ts?: string;
+        isDirect?: boolean;
       }>;
       const fresh = all.slice(seen);
       const messages: InboundMessage[] = fresh.map((m) => ({
@@ -28,6 +29,7 @@ export function makeStubChannel(inboxPath: string, outboxPath: string): Channel 
         sender: m.sender,
         text: m.text,
         ts: m.ts ?? now(),
+        isDirect: m.isDirect,
       }));
       return { messages, cursor: String(all.length) };
     },

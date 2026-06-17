@@ -32,7 +32,7 @@ export function startScheduler(db: Db, channels: Map<string, Channel>): void {
   if (channels.size > 0) {
     cron.schedule(config.chatPollCron, async () => {
       try {
-        ingestChat(db, channels, config.allowedSenders); // inbound: drain socket buffers → triage (allowlist-gated)
+        ingestChat(db, channels, config.allowedSenders, config.operatorNumber); // inbound: allowlist-gated → operator DMs to chat, rest to triage
       } catch (err) {
         console.error('[scheduler] chat ingest failed:', err);
       }

@@ -42,7 +42,10 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   sender          TEXT NOT NULL,
   direction       TEXT NOT NULL CHECK (direction IN ('in', 'out')),
   text            TEXT NOT NULL,
-  ts              TEXT NOT NULL
+  ts              TEXT NOT NULL,
+  -- 1 = a direct (1:1) thread with the harness; 0 = a group. Set by the channel at ingest. Lets us
+  -- find the operator's own DM thread (the proactive-push target) without sniffing JID formats here.
+  is_direct       INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_chat_messages_conversation ON chat_messages (conversation_id, ts);

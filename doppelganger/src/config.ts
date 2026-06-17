@@ -14,6 +14,11 @@ import path from 'node:path';
 
 const KNOWN_CHANNELS = ['stub', 'whatsapp', 'imessage'] as const;
 
+// Keys that once existed and may still sit in a deployed config.json. Tolerated (ignored) so a
+// self-updating box doesn't crash-loop when new code meets an old config. Remove once migrated.
+//   operatorConversationId → replaced by operatorNumber (push target is now derived from the DB).
+const LEGACY_KEYS = new Set(['operatorConversationId']);
+
 interface OperatorConfig {
   channels: string[];
   dispatchIntervalMs: number;
@@ -26,7 +31,7 @@ interface OperatorConfig {
   chatMemoryLines: number;
   allowedSenders: string[];
   claudeBin: string;
-  operatorConversationId: string;
+  operatorNumber: string;
   imessageServerUrl: string;
   imessagePassword: string;
   imessagePollMs: number;
@@ -51,7 +56,7 @@ const defaults: OperatorConfig = {
   chatMemoryLines: 12,
   allowedSenders: [],
   claudeBin: 'claude',
-  operatorConversationId: '',
+  operatorNumber: '',
   imessageServerUrl: '',
   imessagePassword: '',
   imessagePollMs: 3000,
@@ -75,7 +80,7 @@ const envVar: Record<keyof OperatorConfig, string> = {
   chatMemoryLines: 'DOPPELGANGER_CHAT_MEMORY_LINES',
   allowedSenders: 'DOPPELGANGER_ALLOWED_SENDERS',
   claudeBin: 'DOPPELGANGER_CLAUDE_BIN',
-  operatorConversationId: 'DOPPELGANGER_OPERATOR_CONVERSATION_ID',
+  operatorNumber: 'DOPPELGANGER_OPERATOR_NUMBER',
   imessageServerUrl: 'DOPPELGANGER_IMESSAGE_SERVER_URL',
   imessagePassword: 'DOPPELGANGER_IMESSAGE_PASSWORD',
   imessagePollMs: 'DOPPELGANGER_IMESSAGE_POLL_MS',
@@ -104,9 +109,9 @@ function loadFile(home: string): Partial<Record<keyof OperatorConfig, unknown>> 
     return fail(`${file} must be a JSON object`);
   }
   for (const key of Object.keys(parsed)) {
-    if (!(key in defaults)) {
-      return fail(`${file}: unknown key "${key}" (allowed: ${Object.keys(defaults).join(', ')})`);
-    }
+    if (key in defaults) continue;
+    if (LEGACY_KEYS.has(key)) continue; // accepted-but-ignored during migration; don't crash a live box
+    return fail(`${file}: unknown key "${key}" (allowed: ${Object.keys(defaults).join(', ')})`);
   }
   return parsed as Partial<Record<keyof OperatorConfig, unknown>>;
 }
@@ -184,7 +189,7 @@ function resolve(home: string): OperatorConfig {
     chatMemoryLines: posInt(raw('chatMemoryLines'), 'chatMemoryLines'),
     allowedSenders: strList(raw('allowedSenders'), 'allowedSenders'),
     claudeBin: nonEmptyStr(raw('claudeBin'), 'claudeBin'),
-    operatorConversationId: optStr(raw('operatorConversationId'), 'operatorConversationId'),
+    operatorNumber: optStr(raw('operatorNumber'), 'operatorNumber'),
     imessageServerUrl: optStr(raw('imessageServerUrl'), 'imessageServerUrl'),
     imessagePassword: optStr(raw('imessagePassword'), 'imessagePassword'),
     imessagePollMs: posInt(raw('imessagePollMs'), 'imessagePollMs'),

@@ -41,7 +41,10 @@ export function extractInbound(m: BBMessage): InboundMessage | null {
   // handle.address is the individual sender (a phone number or iCloud email); in a group the chat
   // guid is the room and the handle is who spoke. Fall back to the chat guid for a 1:1 with no handle.
   const sender = m.handle?.address ?? conversationId;
-  return { channel: 'imessage', conversationId, sender, text, ts };
+  // BlueBubbles chat guids encode the room type: 1:1 uses ";-;", a group uses ";+;". This is the
+  // channel's own format, so resolving directness here (not in a consumer) keeps the contract.
+  const isDirect = conversationId.includes(';-;');
+  return { channel: 'imessage', conversationId, sender, text, ts, isDirect };
 }
 
 export interface ImessageOptions {

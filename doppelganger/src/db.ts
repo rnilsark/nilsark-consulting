@@ -99,12 +99,21 @@ export function insertChatMessage(
     direction: ChatDirection;
     text: string;
     ts?: string;
+    is_direct?: boolean;
   },
 ): void {
   db.prepare(
-    `INSERT INTO chat_messages (channel, conversation_id, sender, direction, text, ts)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-  ).run(msg.channel, msg.conversation_id, msg.sender, msg.direction, msg.text, msg.ts ?? now());
+    `INSERT INTO chat_messages (channel, conversation_id, sender, direction, text, ts, is_direct)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    msg.channel,
+    msg.conversation_id,
+    msg.sender,
+    msg.direction,
+    msg.text,
+    msg.ts ?? now(),
+    msg.is_direct ? 1 : 0,
+  );
 }
 
 /** Last n messages in a conversation, oldest-first, for injecting as the chat agent's memory. */
@@ -127,6 +136,34 @@ export function inboundConversationChannel(db: Db, conversationId: string): stri
     )
     .get(conversationId) as { channel: string } | undefined;
   return row?.channel;
+}
+
+/**
+ * The operator's own direct (1:1) thread to push proactive messages into: the most recent INBOUND
+ * `is_direct` message whose sender matches the operator's number (compared on digits, so `+46…`,
+ * `46…`, and `46…@s.whatsapp.net` are equal). Returns the conversation_id + the channel it arrived
+ * on, or undefined if the operator has never DM'd us (push target unknown until their first message).
+ *
+ * Derived live (not stored config) so it self-heals if the channel rotates the thread id. Iterates
+ * newest-first and stops at the first match — the operator is the dominant DM partner, so this
+ * returns within the first few rows in practice; no dedicated index needed.
+ */
+export function operatorPushTarget(
+  db: Db,
+  operatorNumber: string,
+): { conversationId: string; channel: string } | undefined {
+  const want = operatorNumber.replace(/\D/g, '');
+  if (!want) return undefined;
+  const stmt = db.prepare(
+    `SELECT conversation_id, channel, sender FROM chat_messages
+     WHERE direction = 'in' AND is_direct = 1 ORDER BY id DESC`,
+  );
+  for (const r of stmt.iterate() as Iterable<{ conversation_id: string; channel: string; sender: string }>) {
+    if (r.sender.replace(/\D/g, '') === want) {
+      return { conversationId: r.conversation_id, channel: r.channel };
+    }
+  }
+  return undefined;
 }
 
 export function insertOutbox(

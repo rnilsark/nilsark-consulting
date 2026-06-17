@@ -3,11 +3,12 @@ import { rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { ingestChat } from '../src/adapters/chat.ts';
+import { ingestChat, isOperator } from '../src/adapters/chat.ts';
 import {
   getChannelCursor,
   insertChatMessage,
   openDb,
+  operatorPushTarget,
   recentChatMessages,
   selectPendingFifo,
   selectPendingOutbox,
@@ -333,7 +334,69 @@ test('extractInbound: maps a plain-text WhatsApp message, filters fromMe / media
   assert.equal(ext?.text, 'kan jag hänga med polarna?');
   assert.equal(ext?.sender, '46700000000@s.whatsapp.net'); // group → participant is the sender
 
+  assert.equal(plain?.isDirect, true); // 1:1 jid → direct
+  assert.equal(ext?.isDirect, false); // @g.us → group
+
   assert.equal(extractInbound({ key: { remoteJid: 'x', fromMe: true }, message: { conversation: 'hi' } } as never), null);
   assert.equal(extractInbound({ key: { remoteJid: 'x', fromMe: false }, message: { imageMessage: {} } } as never), null);
   assert.equal(extractInbound({ key: { fromMe: false }, message: { conversation: 'hi' } } as never), null);
+});
+
+test('isOperator: matches the operator number across +/digits/jid forms; empty number never matches', () => {
+  assert.equal(isOperator('46736625308@s.whatsapp.net', '+46736625308'), true);
+  assert.equal(isOperator('+46736625308', '+46736625308'), true);
+  assert.equal(isOperator('46736625308', '+46736625308'), true);
+  assert.equal(isOperator('46999999999@s.whatsapp.net', '+46736625308'), false);
+  assert.equal(isOperator('46736625308@s.whatsapp.net', ''), false); // unconfigured → off
+});
+
+test('ingest: an operator DM bypasses triage and goes straight to chat', () => {
+  const db = freshDb();
+  const { channel } = memChannel('stub', [
+    { conversationId: 'OP', sender: '46736625308@s.whatsapp.net', text: 'boka tandläkare imorgon', ts: '2026-06-13T10:00:00Z', isDirect: true },
+  ]);
+  ingestChat(db, new Map([[channel.name, channel]]), ['+46736625308'], '+46736625308');
+
+  const queued = selectPendingFifo(db);
+  assert.equal(queued.length, 1);
+  assert.equal(queued[0].agent, 'chat', 'operator DM skips triage');
+  assert.equal(queued[0].task, 'OP', 'chat task is the bare conversationId');
+});
+
+test('ingest: a GROUP message from the operator still goes through triage', () => {
+  const db = freshDb();
+  const { channel } = memChannel('stub', [
+    { conversationId: 'GROUP', sender: '46736625308@s.whatsapp.net', text: 'hej allihop', ts: '2026-06-13T10:00:00Z', isDirect: false },
+  ]);
+  ingestChat(db, new Map([[channel.name, channel]]), ['+46736625308'], '+46736625308');
+
+  const queued = selectPendingFifo(db);
+  assert.equal(queued.length, 1);
+  assert.equal(queued[0].agent, 'triage', 'group → triage even from the operator');
+});
+
+test('ingest: a DM from a non-operator (allowlisted family) still goes through triage', () => {
+  const db = freshDb();
+  const { channel } = memChannel('stub', [
+    { conversationId: 'MOM', sender: '46700000000@s.whatsapp.net', text: 'är vi lediga?', ts: '2026-06-13T10:00:00Z', isDirect: true },
+  ]);
+  ingestChat(db, new Map([[channel.name, channel]]), [], '+46736625308');
+
+  const queued = selectPendingFifo(db);
+  assert.equal(queued.length, 1);
+  assert.equal(queued[0].agent, 'triage', 'only the operator bypasses; family DMs are gated');
+});
+
+test('operatorPushTarget: returns the operator\'s most recent DM thread + channel; ignores groups and unset', () => {
+  const db = freshDb();
+  assert.equal(operatorPushTarget(db, '+46736625308'), undefined); // never DM'd
+
+  insertChatMessage(db, { channel: 'stub', conversation_id: 'GRP', sender: '46736625308@s.whatsapp.net', direction: 'in', text: 'g', is_direct: false });
+  assert.equal(operatorPushTarget(db, '+46736625308'), undefined, 'a group message is not a target');
+
+  insertChatMessage(db, { channel: 'whatsapp', conversation_id: 'DM1', sender: '46736625308@s.whatsapp.net', direction: 'in', text: 'a', is_direct: true });
+  insertChatMessage(db, { channel: 'whatsapp', conversation_id: 'DM2', sender: '46736625308@s.whatsapp.net', direction: 'in', text: 'b', is_direct: true });
+  assert.deepEqual(operatorPushTarget(db, '+46736625308'), { conversationId: 'DM2', channel: 'whatsapp' }, 'most recent DM wins');
+
+  assert.equal(operatorPushTarget(db, ''), undefined, 'unset operator → no target');
 });

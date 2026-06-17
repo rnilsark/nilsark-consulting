@@ -28,15 +28,28 @@ export function isAllowed(sender: string, conversationId: string, allowlist: str
   return false;
 }
 
+/** True if `identity` (a sender id in any form) is the operator's phone number, compared on digits. */
+export function isOperator(identity: string, operatorNumber: string): boolean {
+  const want = operatorNumber.replace(/\D/g, '');
+  return want !== '' && numberDigits(identity) === want;
+}
+
 /**
  * Dumb ingest poll (no LLM): for each channel, read new messages, log them inbound, advance the
  * cursor, and enqueue a `triage` job per message. Triage (Haiku) is the gate that decides whether
  * a message is actually directed at the harness; this adapter just gets messages onto the queue.
  */
-export function ingestChat(db: Db, channels: Map<string, Channel>, allowlist: string[] = []): void {
+export function ingestChat(
+  db: Db,
+  channels: Map<string, Channel>,
+  allowlist: string[] = [],
+  operatorNumber = '',
+): void {
   for (const channel of channels.values()) {
     const cursor = getChannelCursor(db, channel.name);
     const { messages, cursor: nextCursor } = channel.poll(cursor);
+    let direct = 0;
+    let gated = 0;
     for (const msg of messages) {
       if (!isAllowed(msg.sender, msg.conversationId, allowlist)) {
         console.log(`[chat-ingest] ${channel.name}: blocked ${msg.sender} (conv ${msg.conversationId}) — not in allowlist`);
@@ -49,16 +62,27 @@ export function ingestChat(db: Db, channels: Map<string, Channel>, allowlist: st
         direction: 'in',
         text: msg.text,
         ts: msg.ts,
+        is_direct: msg.isDirect,
       });
-      insertQueue(db, {
-        agent: 'triage',
-        task: JSON.stringify({ channel: msg.channel, conversationId: msg.conversationId, text: msg.text }),
-        parent: null,
-      });
+      // A DM from the operator is, by definition, directed at the harness — there's no one else in
+      // the room. Skip triage (the "is this for us?" gate, which only earns its keep in a group) and
+      // hand it straight to chat. Everyone else still goes through triage.
+      const toOperatorDm = msg.isDirect === true && isOperator(msg.sender, operatorNumber);
+      if (toOperatorDm) {
+        insertQueue(db, { agent: 'chat', task: msg.conversationId, parent: null });
+        direct++;
+      } else {
+        insertQueue(db, {
+          agent: 'triage',
+          task: JSON.stringify({ channel: msg.channel, conversationId: msg.conversationId, text: msg.text }),
+          parent: null,
+        });
+        gated++;
+      }
     }
     if (nextCursor !== cursor) setChannelCursor(db, channel.name, nextCursor);
     if (messages.length > 0) {
-      console.log(`[chat-ingest] ${channel.name}: ${messages.length} new → triage`);
+      console.log(`[chat-ingest] ${channel.name}: ${direct} operator DM → chat, ${gated} → triage`);
     }
   }
 }
