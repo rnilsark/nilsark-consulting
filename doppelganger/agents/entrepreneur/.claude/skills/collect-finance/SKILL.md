@@ -22,8 +22,25 @@ mkdir -p "$STAGING_DIR/$MONTH" "$STAGING_DIR/.state"
 
 ## Step 1 — Download state.md
 
-Per the State contract: resolve the month folder → `.doppelganger` subfolder → download state.md
-(capture `STATE_FILE_ID`); first run → create from the template.
+Per the State contract: resolve the month folder → `.doppelganger` subfolder → then fetch with the
+checksum guard:
+
+```bash
+STATE_LIST=$(gws drive files list --params '{"q": "name='\''state.md'\'' and '\'''"$DOPPELGANGER_FOLDER_ID"'\'' in parents and trashed=false", "fields": "files(id,name,headRevisionId,md5Checksum)"}' --format json)
+STATE_FILE_ID=$(echo "$STATE_LIST" | jq -r '.files[0].id // empty')
+STATE_HEAD_REV=$(echo "$STATE_LIST" | jq -r '.files[0].headRevisionId // empty')
+STATE_MD5=$(echo "$STATE_LIST" | jq -r '.files[0].md5Checksum // empty')
+
+LOCAL_MD5=$(md5sum "$STAGING_DIR/.state/$MONTH-state.md" 2>/dev/null | awk '{print $1}')
+if [ -n "$STATE_FILE_ID" ] && [ "$LOCAL_MD5" != "$STATE_MD5" ]; then
+  cd "$STAGING_DIR/.state" && gws drive files get --params '{"fileId": "'$STATE_FILE_ID'", "alt": "media"}' -o "$MONTH-state.md"
+fi
+```
+
+Empty `STATE_FILE_ID` = first run → create from the template. Store `STATE_HEAD_REV` for the upload
+guard. When uploading state.md at the end of this skill, apply the same collision guard as in the
+State contract: re-fetch `headRevisionId`, compare to `STATE_HEAD_REV`, and flag (do not overwrite)
+on a mismatch.
 
 ## Step 2 — List inbox attachments
 
@@ -119,5 +136,6 @@ For each non-statement attachment, **Read** the PDF, then:
 
 ## Step 6 — Persist + report
 
-Recount the Month Summary, upload state.md. Report counts to the agent (collected by type, any
-`unknown`, bank-match results). **No payments, no drafts, no send** — the agent handles the rest.
+Recount the Month Summary, upload state.md (apply collision guard as specified in Step 1). Report
+counts to the agent (collected by type, any `unknown`, bank-match results). **No payments, no drafts,
+no send** — the agent handles the rest.
