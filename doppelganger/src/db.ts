@@ -147,6 +147,14 @@ export function markOutboxSent(db: Db, id: number): void {
   db.prepare(`UPDATE outbox SET status = 'sent' WHERE id = ?`).run(id);
 }
 
+export function lastEntrepreneurSuccess(db: Db): { ts: string } | undefined {
+  return db
+    .prepare(
+      `SELECT ts FROM events WHERE agent = 'entrepreneur' AND kind = 'finished' AND status = 'success' ORDER BY id DESC LIMIT 1`,
+    )
+    .get() as { ts: string } | undefined;
+}
+
 export function getChannelCursor(db: Db, channel: string): string | null {
   const row = db.prepare(`SELECT cursor FROM channel_state WHERE channel = ?`).get(channel) as
     | { cursor: string | null }

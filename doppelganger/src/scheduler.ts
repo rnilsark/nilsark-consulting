@@ -1,5 +1,6 @@
 import cron from 'node-cron';
 import { enqueue, jobs } from './adapters/schedule.ts';
+import { runHealthcheck } from './adapters/health.ts';
 import { ingestChat } from './adapters/chat.ts';
 import { config } from './config.ts';
 import type { Db } from './db.ts';
@@ -18,6 +19,15 @@ export function startScheduler(db: Db, channels: Map<string, Channel>): void {
     });
     console.log(`[scheduler] ${job.agent}/${job.task} @ "${job.cron}"`);
   }
+
+  cron.schedule(config.healthcheckCron, () => {
+    try {
+      runHealthcheck(db);
+    } catch (err) {
+      console.error('[scheduler] healthcheck failed:', err);
+    }
+  });
+  console.log(`[scheduler] healthcheck @ "${config.healthcheckCron}"`);
 
   if (channels.size > 0) {
     cron.schedule(config.chatPollCron, async () => {
