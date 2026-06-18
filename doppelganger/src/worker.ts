@@ -101,6 +101,14 @@ export function buildPrompt(row: QueueRow, outPath: string, registry: Registry, 
         `To push a message to the operator, add a reply with conversationId ` +
           `"${target.conversationId}" (their own thread, given to you here — trusted).`,
       );
+    } else {
+      // Loud, not silent: a proactive run (e.g. morning brief) with operatorNumber set but no
+      // resolvable DM thread will produce no reply and deliver nothing. Surface it so a cold start
+      // (no is_direct=1 row yet, e.g. right after the migration) is visible in logs, not a mystery.
+      console.warn(
+        `[worker] run=${row.run_id} agent=${row.agent}: operatorNumber set but no direct-message ` +
+          `thread resolved — this push has no target and will deliver nothing.`,
+      );
     }
   }
 
@@ -197,12 +205,14 @@ export function readOutcome(outPath: string, cost: number | null, failure: strin
 }
 
 /**
- * Fast "on it" acks, sent the instant triage escalates a message to chat. The point is a sign of
- * life: chat (opus) + planner (sonnet) are slow, so a deterministic one-liner bridges the gap and
- * makes the whole thing feel responsive. Kept in code, not the LLM — instant and free, no extra run.
+ * Fast "on it" acks, sent the instant a chat run starts (before its slow LLM reply). The point is a
+ * sign of life: chat (opus) is slow, so a deterministic one-liner bridges the gap and makes the whole
+ * thing feel responsive — and it fires on every path into chat (triage escalation OR operator-DM
+ * bypass). Kept in code, not the LLM — instant and free, no extra run. (pickAck takes an injectable
+ * list, so these can move to per-agent settings later without touching call sites.)
  * Variety on purpose: terse, dry, and the occasional silly one, so it never reads like a robot.
  */
-export const TRIAGE_ACKS = [
+export const CHAT_ACKS = [
   'Japp, jag kollar.',
   'Är på det.',
   'Mottaget — återkommer strax.',
@@ -219,24 +229,20 @@ export const TRIAGE_ACKS = [
   'Okej, gräver i det.',
 ];
 
-export function pickAck(acks: string[] = TRIAGE_ACKS): string {
+export function pickAck(acks: string[] = CHAT_ACKS): string {
   return acks[Math.floor(Math.random() * acks.length)];
 }
 
 /**
- * When triage escalates to chat, drop an instant canned ack into the conversation so the human sees
- * a fast reply ahead of the (slower) real answer. No-op unless triage actually escalated, and gated
- * by the same rule as routeReplies: only into a conversation we've heard from. Inserted before the
- * chat run produces its answer, so the lower outbox id drains first — ack lands ahead of the reply.
+ * Drop an instant canned ack into the conversation the moment a chat run STARTS, so the human sees a
+ * fast "on it" ahead of the (slower) real answer. Called before the LLM runs, so the lower outbox id
+ * drains first — ack lands ahead of the reply. Fires on every path into chat (triage escalation OR
+ * the operator-DM bypass), since chat is only ever invoked for a message directed at the harness.
+ * Gated like routeReplies: only into a conversation we've actually heard from. Only the chat agent
+ * acks (a directly-addressed turn); planner/entrepreneur/triage runs do not.
  */
-export function acknowledgeTriage(
-  db: Db,
-  row: QueueRow,
-  outcome: Outcome,
-  ack: () => string = pickAck,
-): void {
-  if (row.agent !== 'triage' || outcome.status === 'error') return;
-  if (!(outcome.orders ?? []).some((o) => o.agent === 'chat')) return;
+export function acknowledgeChat(db: Db, row: QueueRow, ack: () => string = pickAck): void {
+  if (row.agent !== 'chat') return;
   const conversationId = conversationIdFor(row);
   if (!conversationId) return;
   const channel = inboundConversationChannel(db, conversationId);
@@ -306,10 +312,10 @@ function main(): void {
   const outPath = path.join(runDir, 'out.json');
 
   console.log(`[worker] run=${row.run_id} agent=${row.agent} task=${row.task}`);
+  acknowledgeChat(db, row); // sign of life BEFORE the slow LLM run; drains ahead of the reply
   const { cost, failure } = runClaude(row, buildPrompt(row, outPath, registry, db), registry, runDir);
   const outcome = readOutcome(outPath, cost, failure);
   routeReplies(db, outcome);
-  acknowledgeTriage(db, row, outcome);
   finalize(db, row, outcome);
   console.log(`[worker] finished status=${outcome.status} cost=${outcome.cost ?? '?'} — ${outcome.summary}`);
 }

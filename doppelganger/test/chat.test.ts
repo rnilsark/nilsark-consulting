@@ -14,7 +14,7 @@ import {
   selectPendingOutbox,
 } from '../src/db.ts';
 import { drainOutbox } from '../src/outbox.ts';
-import { acknowledgeTriage, buildPrompt, pickAck, readOutcome, routeReplies, saveTranscript, TRIAGE_ACKS, type Outcome } from '../src/worker.ts';
+import { acknowledgeChat, buildPrompt, CHAT_ACKS, pickAck, readOutcome, routeReplies, saveTranscript, type Outcome } from '../src/worker.ts';
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir as osTmpdir } from 'node:os';
 import type { Channel, InboundMessage } from '../src/channels/types.ts';
@@ -189,18 +189,17 @@ test('drainOutbox: send failure leaves the row pending for retry', async () => {
   assert.equal(recentChatMessages(db, 'C1', 10).filter((m) => m.direction === 'out').length, 0);
 });
 
-function triageRow(task: object): QueueRow {
+function chatRow(conversationId: string): QueueRow {
   return {
-    id: 7, agent: 'triage', task: JSON.stringify(task), status: 'running', parent: null,
+    id: 8, agent: 'chat', task: conversationId, status: 'running', parent: 'R1',
     run_id: 'RACK', pid: 1, running_since: null, attempts: 0, created_at: 'now',
   };
 }
 
-test('acknowledgeTriage: escalation queues one canned ack into the conversation', () => {
+test('acknowledgeChat: a chat run queues one canned ack into the conversation', () => {
   const db = freshDb();
   insertChatMessage(db, { channel: 'stub', conversation_id: 'C1', sender: 'mom', direction: 'in', text: 'är vi lediga 12 aug?' });
-  const row = triageRow({ channel: 'stub', conversationId: 'C1', text: 'är vi lediga 12 aug?' });
-  acknowledgeTriage(db, row, { status: 'success', summary: 'directed', orders: [{ agent: 'chat', task: 'C1' }], cost: null }, () => 'På saken!');
+  acknowledgeChat(db, chatRow('C1'), () => 'På saken!');
 
   const pending = selectPendingOutbox(db);
   assert.equal(pending.length, 1);
@@ -209,37 +208,20 @@ test('acknowledgeTriage: escalation queues one canned ack into the conversation'
   assert.equal(pending[0].text, 'På saken!');
 });
 
-test('acknowledgeTriage: no chat order (not directed) → no ack', () => {
-  const db = freshDb();
-  insertChatMessage(db, { channel: 'stub', conversation_id: 'C1', sender: 'mom', direction: 'in', text: 'hej' });
-  const row = triageRow({ channel: 'stub', conversationId: 'C1', text: 'hej' });
-  acknowledgeTriage(db, row, { status: 'success', summary: 'not directed', orders: [], cost: null });
-  assert.equal(selectPendingOutbox(db).length, 0);
-});
-
-test('acknowledgeTriage: only triage acks — chat agent escalating elsewhere does not', () => {
+test('acknowledgeChat: only the chat agent acks — triage/planner runs do not', () => {
   const db = freshDb();
   insertChatMessage(db, { channel: 'stub', conversation_id: 'C1', sender: 'mom', direction: 'in', text: 'boka' });
-  const row: QueueRow = {
-    id: 8, agent: 'chat', task: 'C1', status: 'running', parent: 'R1',
-    run_id: 'R1', pid: 1, running_since: null, attempts: 0, created_at: 'now',
+  const triage: QueueRow = {
+    id: 7, agent: 'triage', task: JSON.stringify({ channel: 'stub', conversationId: 'C1', text: 'boka' }),
+    status: 'running', parent: null, run_id: 'R1', pid: 1, running_since: null, attempts: 0, created_at: 'now',
   };
-  acknowledgeTriage(db, row, { status: 'success', summary: 'x', orders: [{ agent: 'planner', task: 'C1' }], cost: null });
+  acknowledgeChat(db, triage);
   assert.equal(selectPendingOutbox(db).length, 0);
 });
 
-test('acknowledgeTriage: unknown conversation (never heard from) → no ack', () => {
+test('acknowledgeChat: unknown conversation (never heard from) → no ack', () => {
   const db = freshDb();
-  const row = triageRow({ channel: 'stub', conversationId: 'GHOST', text: 'hi' });
-  acknowledgeTriage(db, row, { status: 'success', summary: 'directed', orders: [{ agent: 'chat', task: 'GHOST' }], cost: null });
-  assert.equal(selectPendingOutbox(db).length, 0);
-});
-
-test('acknowledgeTriage: error outcome queues nothing', () => {
-  const db = freshDb();
-  insertChatMessage(db, { channel: 'stub', conversation_id: 'C1', sender: 'mom', direction: 'in', text: 'hi' });
-  const row = triageRow({ channel: 'stub', conversationId: 'C1', text: 'hi' });
-  acknowledgeTriage(db, row, { status: 'error', summary: 'boom', orders: [{ agent: 'chat', task: 'C1' }], cost: null });
+  acknowledgeChat(db, chatRow('GHOST'));
   assert.equal(selectPendingOutbox(db).length, 0);
 });
 
@@ -260,8 +242,8 @@ test('saveTranscript: no stdout writes nothing and does not throw', () => {
 });
 
 test('pickAck: always returns a member of the canned list', () => {
-  assert.ok(TRIAGE_ACKS.length > 1);
-  for (let i = 0; i < 50; i++) assert.ok(TRIAGE_ACKS.includes(pickAck()));
+  assert.ok(CHAT_ACKS.length > 1);
+  for (let i = 0; i < 50; i++) assert.ok(CHAT_ACKS.includes(pickAck()));
 });
 
 test('readOutcome: parses replies and ignores malformed ones', () => {
