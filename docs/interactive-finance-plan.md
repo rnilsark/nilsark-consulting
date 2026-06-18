@@ -106,6 +106,11 @@ Must precede the daily flip (3a).
 
 The bigger build. Only safe after Phase 1.
 
+> **Daily run stays a backstop (decided 2026-06-18, see Decision log).** Phase 5 makes the inbox poll
+> the *fast primary* intake — it does NOT remove intake from `entrepreneur:run`. The daily run keeps a
+> catch-all collect/classify sweep (idempotent dedup → near-free when nothing's new) as insurance
+> against poll blind spots. Phase 5 = diet, not amputation.
+
 - [ ] **5a. `inbox-ingest` adapter** (`src/adapters/inbox.ts`) — deterministic, no LLM. Shell
       `gws gmail` list with query (`has:attachment` + sender allowlist) + cursor in `channel_state`
       (key `inbox`, last `internalDate`). Enqueue an `inbox` row per candidate with
@@ -192,3 +197,10 @@ Allocated identifiers / contracts (picked up front so slices agree without talki
 - One credentialed `entrepreneur` parameterized by task — do NOT split intake into a second
   credentialed agent (avoids duplicating Fortnox/gws creds + drift).
 - Push/Pub-Sub deferred as premature; polling is 95% of the benefit at 10% of the complexity.
+- **Daily run keeps intake as a backstop after Phase 5 (decided 2026-06-18)** — Option B, not a pure
+  handoff. The inbox poll is the fast primary path; the daily `entrepreneur:run` still does a
+  catch-all collect/classify sweep so nothing is lost when the poll misses: no-attachment docs (Kivra
+  "ny faktura" notices arrive with NO attachment and won't match a `has:attachment` filter),
+  sender-filter misses, or a poll outage. The re-scan is near-free (the `state.md` "already
+  classified" dedup short-circuits it when there's nothing new). Reconciliation, payment due-date
+  sweep, edge-notify and todo emission were never per-document and remain daily regardless.
