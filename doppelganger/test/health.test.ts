@@ -68,6 +68,14 @@ test('fresh last-success + auth ok → no outbox row', () => {
   assert.equal(selectPendingOutbox(db).length, 0);
 });
 
+test('no entrepreneur run on record yet (auth ok) → no alert (fresh deploy, not a failure)', () => {
+  const db = freshDb();
+  seedOperatorDm(db);
+  // no success events at all
+  withOperator(OPERATOR, () => runHealthcheck(db, authOk));
+  assert.equal(selectPendingOutbox(db).length, 0, 'absence of a baseline is not staleness');
+});
+
 test('empty operatorNumber → no outbox row regardless of stale status', () => {
   const db = freshDb();
   // stale: no events at all → would normally alert

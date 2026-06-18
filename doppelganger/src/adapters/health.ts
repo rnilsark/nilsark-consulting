@@ -5,7 +5,7 @@ import { insertOutbox, lastEntrepreneurSuccess, operatorPushTarget, type Db } fr
 export type AuthPing = () => { ok: boolean; detail: string };
 
 const defaultAuthPing: AuthPing = () => {
-  const result = spawnSync('gws', ['calendar', 'list', '--max-results=1'], {
+  const result = spawnSync('gws', ['gmail', 'users', 'getProfile', '--params', '{"userId":"me"}'], {
     encoding: 'utf8',
     timeout: 15_000,
   });
@@ -30,10 +30,10 @@ function pushAlert(db: Db, text: string): void {
 }
 
 export function runHealthcheck(db: Db, authPing: AuthPing = defaultAuthPing): void {
+  // No success on record yet (fresh deploy, before the first scheduled run) is not a failure —
+  // only an established baseline going stale is. Skip the staleness check until there's one to age.
   const last = lastEntrepreneurSuccess(db);
-  if (!last) {
-    pushAlert(db, `[healthcheck] No successful entrepreneur run on record.`);
-  } else {
+  if (last) {
     const ageMs = Date.now() - new Date(last.ts).getTime();
     const ageHours = ageMs / 3_600_000;
     if (ageHours > config.staleRunHours) {
