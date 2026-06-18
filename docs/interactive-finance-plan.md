@@ -7,8 +7,9 @@ as you go.** Companion to `docs/cfo-architecture.md`.
 ## Status
 
 - **Current phase:** Phases 1–4 SHIPPED to `main` (3b deferred). Next: Phase 5 (inbox path).
-- **Last updated:** 2026-06-17
-- **Integrated commits:** `6f3c960` cap · `e956217` cadence+config · `641ed32` healthcheck+tests · `2c8ba84` entrepreneur (1b/2a/2b). 66/66 tests, typecheck clean.
+- **Last updated:** 2026-06-18
+- **Integrated commits:** `6f3c960` cap · `e956217` cadence+config · `641ed32` healthcheck+tests · `2c8ba84` entrepreneur (1b/2a/2b) · `a1128f8` healthcheck probe fix (valid gws ping + no cry-wolf before first run). 72/72 tests, typecheck clean.
+- **Post-Phase-4 infra change — operator-notification delivery (READ THIS, it changed how every push lands):** the healthcheck/edge-notify push target is no longer the hardcoded `operatorConversationId`. It is now **derived** from the DB via `operatorNumber` — `operatorPushTarget()` returns the operator's most recent `is_direct=1` (direct/1:1) message thread, self-healing if the thread id rotates and never leaking a push into a group. Commits `7d1c7d5` (operator-DM-bypasses-triage + derive) and `095727b` (instant ack moved to chat-start). Cold-start caveat: needs at least one `is_direct=1` row, so a fresh deploy delivers nothing until the operator's first DM (or a one-time backfill of the known thread).
 
 ## Guiding split
 
@@ -95,8 +96,9 @@ Must precede the daily flip (3a).
 
 - [x] New `src/adapters/health.ts` + cron in `scheduler.ts`
 - [x] Check last `finished/success` of `entrepreneur` in `events`; stale beyond `staleRunHours` → alert
-- [x] `gws` auth ping; failure → alert
-- [x] On alert, push directly to `operatorConversationId` via `insertOutbox` (no agent, no tokens)
+- [x] `gws` auth ping; failure → alert *(probe is `gws gmail users getProfile` — the original `gws calendar list` was an invalid command that always "failed"; fixed in `a1128f8`)*
+- [x] On alert, push to the operator via `insertOutbox` (no agent, no tokens) *(post-ship: target is now `operatorPushTarget(config.operatorNumber)`, NOT the hardcoded `operatorConversationId` — see the Status note)*
+- [x] *(post-ship, `a1128f8`)* staleness alert suppressed until a first `entrepreneur` success exists — no cry-wolf on a fresh deploy
 - [x] Config: `healthcheckCron`, `staleRunHours` (defaults + example + env map)
 - [x] `npm run typecheck && npm test`
 
@@ -155,9 +157,11 @@ Allocated identifiers / contracts (picked up front so slices agree without talki
   - `registry.yaml` `entrepreneur.max_concurrency: 1`; `pick()` never runs 2 entrepreneurs at once
     (extras stay `pending`, FIFO); uncapped agents keep full parallelism.
   - `financeHeartbeatCron` default is daily; `config.example.json` matches.
-  - `health.ts` cron alerts the operator (`insertOutbox` to `operatorConversationId`, no LLM) when
-    the last `entrepreneur` `finished/success` event is older than `staleRunHours`, or a `gws` auth
-    ping fails. New config keys parsed/validated + in env map + example.
+  - `health.ts` cron alerts the operator (`insertOutbox`, no LLM) when the last `entrepreneur`
+    `finished/success` event is older than `staleRunHours`, or a `gws` auth ping fails. New config keys
+    parsed/validated + in env map + example. *(Shipped against `operatorConversationId`; superseded
+    post-ship — target now derived via `operatorPushTarget(operatorNumber)`, staleness check skipped
+    until a first success exists, gws probe corrected — `a1128f8`.)*
   - `npm run typecheck && npm test` green.
 - **Tests:** extend `test/` — dispatcher cap (2 entrepreneur rows → 1 running); a health-adapter
   unit (stale → outbox row; fresh → none). Follow existing test style.
