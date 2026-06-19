@@ -40,6 +40,8 @@ interface OperatorConfig {
   selfUpdateRef: string;
   healthcheckCron: string;
   staleRunHours: number;
+  inboxPollCron: string;
+  inboxSenders: string[];
 }
 
 const defaults: OperatorConfig = {
@@ -65,6 +67,10 @@ const defaults: OperatorConfig = {
   selfUpdateRef: 'stable',
   healthcheckCron: '0 * * * *',
   staleRunHours: 30,
+  inboxPollCron: '*/15 * * * *',
+  // Email senders whose `has:attachment` mail the inbox poll surfaces. Empty = no `from:` filter
+  // (every attachment-bearing message is a candidate) — set this to the finance senders in prod.
+  inboxSenders: [],
 };
 
 /** The env var that overrides each operator key (keys not listed are file/default only). */
@@ -89,6 +95,8 @@ const envVar: Record<keyof OperatorConfig, string> = {
   selfUpdateRef: 'DOPPELGANGER_SELF_UPDATE_REF',
   healthcheckCron: 'DOPPELGANGER_HEALTHCHECK_CRON',
   staleRunHours: 'DOPPELGANGER_STALE_RUN_HOURS',
+  inboxPollCron: 'DOPPELGANGER_INBOX_POLL_CRON',
+  inboxSenders: 'DOPPELGANGER_INBOX_SENDERS',
 };
 
 function fail(msg: string): never {
@@ -198,6 +206,8 @@ function resolve(home: string): OperatorConfig {
     selfUpdateRef: nonEmptyStr(raw('selfUpdateRef'), 'selfUpdateRef'),
     healthcheckCron: cronExpr(raw('healthcheckCron'), 'healthcheckCron'),
     staleRunHours: posInt(raw('staleRunHours'), 'staleRunHours'),
+    inboxPollCron: cronExpr(raw('inboxPollCron'), 'inboxPollCron'),
+    inboxSenders: strList(raw('inboxSenders'), 'inboxSenders'),
   };
 }
 

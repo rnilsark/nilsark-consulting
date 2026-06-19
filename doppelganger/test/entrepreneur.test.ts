@@ -13,8 +13,17 @@ test('registry: entrepreneur may draft but never bare-send, and has no broad Bas
   assert.ok(!tools.includes('Bash'), 'no standalone broad Bash');
 });
 
-test('registry: entrepreneur is reachable from the heartbeat cron and from chat', () => {
+test('registry: entrepreneur is reachable from the heartbeat cron, from chat, and from the inbox gate', () => {
   const registry = loadRegistry();
-  assert.deepEqual(registry.agents.entrepreneur.can_be_called_by, ['schedule', 'chat']);
+  assert.deepEqual(registry.agents.entrepreneur.can_be_called_by, ['schedule', 'chat', 'inbox']);
   assert.equal(registry.agents['inbox-triage'], undefined, 'inbox-triage removed');
+});
+
+test('registry: inbox is an untrusted-text gate — only the inbox-ingest adapter may call it, no domain tools', () => {
+  const registry = loadRegistry();
+  const inbox = registry.agents.inbox;
+  assert.ok(inbox, 'inbox agent is registered');
+  assert.deepEqual(inbox.can_be_called_by, ['inbox-ingest']);
+  assert.equal(inbox.tools, 'Read,Write', 'gate only: no gws/Drive/Fortnox creds');
+  assert.equal(inbox.model, 'haiku');
 });

@@ -18,5 +18,7 @@
   "selfUpdateCron": "*/5 * * * *",
   "selfUpdateRef": "stable",
   "healthcheckCron": "0 * * * *",
-  "staleRunHours": 30
+  "staleRunHours": 30,
+  "inboxPollCron": "*/15 * * * *",
+  "inboxSenders": []
 }

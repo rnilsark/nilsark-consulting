@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import { enqueue, jobs } from './adapters/schedule.ts';
 import { runHealthcheck } from './adapters/health.ts';
 import { ingestChat } from './adapters/chat.ts';
+import { ingestInbox } from './adapters/inbox.ts';
 import { config } from './config.ts';
 import type { Db } from './db.ts';
 import { drainOutbox } from './outbox.ts';
@@ -28,6 +29,15 @@ export function startScheduler(db: Db, channels: Map<string, Channel>): void {
     }
   });
   console.log(`[scheduler] healthcheck @ "${config.healthcheckCron}"`);
+
+  cron.schedule(config.inboxPollCron, () => {
+    try {
+      ingestInbox(db, config.inboxSenders); // event-driven intake: enqueue metadata-only `inbox` rows for new finance mail
+    } catch (err) {
+      console.error('[scheduler] inbox ingest failed:', err);
+    }
+  });
+  console.log(`[scheduler] inbox ingest @ "${config.inboxPollCron}"`);
 
   if (channels.size > 0) {
     cron.schedule(config.chatPollCron, async () => {
