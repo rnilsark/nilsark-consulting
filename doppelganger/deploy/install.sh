@@ -9,6 +9,7 @@ UNIT_DIR="$HOME/.config/systemd/user"
 
 command -v claude >/dev/null || { echo "ERROR: claude CLI missing (install + log in)"; exit 1; }
 command -v gws >/dev/null || { echo "ERROR: gws CLI missing (install + gws auth login)"; exit 1; }
+command -v jq >/dev/null || { echo "ERROR: jq missing (apt install jq) — entrepreneur uses it to parse gws JSON"; exit 1; }
 [ -d "$REPO_DIR/doppelganger/node_modules" ] || (cd "$REPO_DIR/doppelganger" && npm install)
 
 mkdir -p "$UNIT_DIR" "$DOPPELGANGER_HOME"

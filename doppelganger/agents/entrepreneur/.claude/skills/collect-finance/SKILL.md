@@ -62,7 +62,7 @@ For each id:
   ```bash
   gws gmail users messages attachments get \
     --params '{"userId":"me","messageId":"<id>","id":"<attachmentId>"}' --format json 2>/dev/null \
-    | python3 -c "import sys,json,base64; sys.stdout.buffer.write(base64.urlsafe_b64decode(json.load(sys.stdin)['data']+'=='))" \
+    | jq -r '.data' | basenc --base64url -d \
     > "$STAGING_DIR/$MONTH/<filename>"
   ```
   Original filename; append the message_id on a name collision. Write a Processed Gmail row

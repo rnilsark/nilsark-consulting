@@ -40,12 +40,16 @@ agents:
   # its own local .claude/skills (vendored; no reach into the nilsark plugin or any repo path), and
   # its config comes from its injected `## Settings` (no config-file reads). Does the autonomous-safe
   # finance run: collect/classify/upload, bank matching, payment refresh, anomaly scan, month-close
-  # DRAFTS, and the todo. Reachable from the schedule (the heartbeat cron fires the `run` task) and
-  # from chat (a verified person can ask for a run). Safe to expose to chat because the run is
-  # non-destructive: tools are read-only Gmail + the DRAFT form only — bare `gws gmail +send` and
-  # broad `Bash` are deliberately ABSENT, so it can never transmit or pay.
+  # DRAFTS, and the todo. Reachable from the schedule (the heartbeat cron fires the `run` task), from
+  # chat (a verified person can ask for a run), and from inbox (event-driven intake). It reads
+  # untrusted email/attachments, so the grant is deliberately narrow:
+  #   - Gmail: read (`users:*`) + DRAFT form only — no bare `+send`, so it can't transmit email.
+  #   - Drive: only get/list/update/+upload — NO `files delete` (can't destroy records) and NO
+  #     `permissions` (can't share a file out to exfiltrate). Pair with a `drive.file`-scoped token.
+  #   - NO `python3`/`node -c` arbitrary exec: the one base64 decode uses jq + basenc instead.
+  #   - Never pays / never does BankID (no tools for either).
   entrepreneur:
     can_be_called_by: [schedule, chat, inbox]
-    tools: "Bash(gws gmail users:*),Bash(gws gmail +send --draft:*),Bash(gws drive:*),Bash(date:*),Bash(jq:*),Bash(python3:*),Bash(mkdir:*),Bash(mv:*),Bash(cd:*),Read,Write,Edit,Skill"
+    tools: "Bash(gws gmail users:*),Bash(gws gmail +send --draft:*),Bash(gws drive files get:*),Bash(gws drive files list:*),Bash(gws drive files update:*),Bash(gws drive +upload:*),Bash(date:*),Bash(jq:*),Bash(basenc:*),Bash(mkdir:*),Bash(mv:*),Bash(cd:*),Read,Write,Edit,Skill"
     model: sonnet
     max_concurrency: 1
