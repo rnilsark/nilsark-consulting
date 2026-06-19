@@ -40,9 +40,14 @@ export function buildQuery(allowlist: string[]): string {
 
 function runGws(args: string[]): { ok: boolean; stdout: string; detail: string } {
   const res = spawnSync('gws', args, { encoding: 'utf8', timeout: 30_000, maxBuffer: 16 * 1024 * 1024 });
-  const output = (res.stdout ?? '') + (res.stderr ?? '');
   if (res.error) return { ok: false, stdout: '', detail: res.error.message };
-  if (res.status !== 0 || /auth|token|unauthenticated|unauthorized|login/i.test(output)) {
+  // Status only — do NOT content-match for auth keywords. A message's own headers and subject
+  // legitimately contain words like "Authentication-Results", "login", or "token", and a content
+  // match would mistake every such email for an auth failure and silently drop it (basically all
+  // mail has an Authentication-Results header). A real gws auth failure exits non-zero; the
+  // healthcheck adapter is what alerts on auth, and a bad exit here just means "no candidates".
+  if (res.status !== 0) {
+    const output = (res.stdout ?? '') + (res.stderr ?? '');
     return { ok: false, stdout: res.stdout ?? '', detail: output.slice(0, 200) };
   }
   return { ok: true, stdout: res.stdout ?? '', detail: '' };
@@ -65,9 +70,12 @@ interface GmailGetResponse {
 
 /**
  * Default lister: shells out to `gws gmail`. Lists message ids matching the query, then fetches each
- * one's metadata (headers + attachment parts) — metadata ONLY, never the attachment bytes. Lazy
- * download of the bytes happens later inside `entrepreneur:intake`, one message per run, so each
- * document gets an isolated context. Returns messages newer than `cursor` (strict `internalDate >`).
+ * one's headers + MIME structure. Uses `format: full` (not `metadata`) because `metadata` omits the
+ * parts tree, so attachment filenames wouldn't be visible. `full` still does NOT pull the attachment
+ * BYTES — attachments are returned as `attachmentId` references; only the email body is inlined, and
+ * that is read-and-discarded here (never enqueued). The lazy attachment download still happens later
+ * inside `entrepreneur:intake`, one message per run, so each document gets an isolated context.
+ * Returns messages newer than `cursor` (strict `internalDate >`).
  */
 export const defaultGmailList: GmailList = (allowlist, cursor) => {
   const q = buildQuery(allowlist);
@@ -89,7 +97,7 @@ export const defaultGmailList: GmailList = (allowlist, cursor) => {
   const since = cursor ? Number(cursor) : 0;
   const out: InboxMessage[] = [];
   for (const id of ids) {
-    const getParams = JSON.stringify({ userId: 'me', id, format: 'metadata' });
+    const getParams = JSON.stringify({ userId: 'me', id, format: 'full' });
     const got = runGws(['gmail', 'users', 'messages', 'get', '--params', getParams, '--format', 'json']);
     if (!got.ok) {
       console.error(`[inbox-ingest] gmail get ${id} failed: ${got.detail}`);
