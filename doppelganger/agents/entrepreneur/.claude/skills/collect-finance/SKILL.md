@@ -48,13 +48,21 @@ on a mismatch.
 gws gmail users messages list --params '{"userId":"me","q":"has:attachment in:inbox after:'"$FIRST_DAY"'","maxResults":100}' --format json
 ```
 
-## Step 3 — Per message-id: dedup + download
+## Step 3 — Batch-dedup first (no fetches), then download only the new ones
 
-For each id:
-- **Dedup (across open periods):** skip the message if it is already `classified`/`skipped — …` in
-  `MONTH`'s state.md **or in any other open period's state.md** — reprocess only if its rows are
-  `downloaded`/`error`. (A bank statement sits in several periods' `after:` windows; the cross-period
-  check ensures the earlier pass that already handled it isn't repeated here.)
+**Dedup as a set, with ZERO fetches.** Take the message-ids from the Step 2 list. The already-handled
+set is the `Processed Gmail` rows across the open periods' state.md you have **already loaded** — a row
+counts as handled when its status is `classified`/`skipped — …` (reprocess only `downloaded`/`error`).
+The message-id alone is the key: do **not** re-download state.md, and do **not** `get` a message to
+decide whether it's been handled.
+
+Compute `NEW = (listed ids) − (already-handled ids)`. **If `NEW` is empty, intake is done — skip the
+rest of Step 3 entirely: no metadata `get`, no download.** This is the normal case on a day with
+nothing new (most days, now that the event-driven inbox path files documents as they arrive). Do
+**not** fetch the already-handled messages just to re-confirm them — that is the single biggest waste
+on a quiet run.
+
+For each id in **`NEW` only**:
 - **Metadata:** `gws gmail users messages get --params '{"userId":"me","id":"<id>"}' --format json` →
   `from`, `date`, `subject`, attachment parts (parts with a non-empty `filename`, `mimeType` not
   `multipart/*`).
