@@ -97,16 +97,18 @@ Two change-types, two strategies:
   the `notify` items so the due-date sweep runs in TS without parsing `state.md`. Absent on old data →
   the entrepreneur writes it on its next run; TS reads it once present. **Self-healing.** The early,
   high-value steps (skip-gate, due-date sweep, fingerprint, edge-notify) are mostly this.
-- **Replacement (the hard one): cut over at a month boundary, do NOT migrate in-flight data.** When
-  structured JSON *replaces* `state.md` as the ledger source-of-truth, let the open months finish to
-  month-close under the OLD markdown path; months started after cutover (2026-07+) are **born
-  structured**. Code supports both during the transition — detect a month's format and route
-  accordingly — and the old path retires once every old-format month is closed.
+- **Replacement (the hard one): one-time migration on the single box — NO dual-format code.** There
+  is exactly **one install** (the Pi), so a state-format change is a controlled one-time operation,
+  not a fleet rollout. Change the code to the clean target, deploy, then transform the Pi's existing
+  `state.md` → structured JSON **once** (same shape as the `is_direct` backfill). Do **not** burden
+  the code with transitional dual-format support — migrate the *data* to match the *code*. A
+  month-boundary cutover is available if ever wanted, but it is **not** the default: the operator
+  prefers the clean design + a one-time migration over carrying compatibility shims.
 
-The **month is the migration unit** (fits the existing open-periods model): never rewrite a live
-month's ledger. A one-time `state.md → JSON` parse is possible if you want the open month on the new
-path immediately, but it re-introduces the brittle markdown parsing we're removing — prefer the
-boundary cutover unless there's a reason.
+Because the records are **financial** (they feed the bookkeeper), keep migrations **validated and
+reversible** even while moving fast: diff the migrated JSON against the source `state.md`, and keep
+the old `state.md` (Drive versions it anyway) until the new path is confirmed. Aggressive on design,
+careful on the data.
 
 ## Dashboard / visualization (follows the architecture, not the reverse)
 
@@ -153,5 +155,7 @@ boundary cutover unless there's a reason.
   domains. Some clusters are doors, some are domains; don't flatten the distinction.
 - **Incremental migration, skip-gate first** — highest value, cleanest cut, reads existing `state.json`.
 - **Architecture leads the visualization**, not the reverse.
-- **Migration: additive fields self-heal; ledger replacement cuts over at a month boundary** — never
-  rewrite an in-flight month's ledger; the month is the migration unit.
+- **Migration: single Pi install → one-time hard migration, NO dual-format code.** Additive fields
+  self-heal; for a ledger-format replacement, change the code and migrate the Pi's data to match (like
+  the `is_direct` backfill). Validate + keep a backup (financial records), but don't contort the
+  design to avoid migrating. Best harness > avoiding breaking changes; long-term quality is the goal.
