@@ -87,6 +87,27 @@ the root smell. TS should own **structured JSON** as the source of truth; keep a
 view *for the bookkeeper*, not as the thing the machine parses. `state.json` already exists for thin
 metadata — grow it into the ledger, render `state.md` from it.
 
+## Migration & cutover (in-flight months — DON'T skip this)
+
+A state-FORMAT change can't ignore the open month: 2026-06 (and any unclosed prior) already has a
+markdown `state.md` ledger on Drive. Same hazard class as the `is_direct` column + config lockstep.
+Two change-types, two strategies:
+
+- **Additive (gentle, no migration).** New *fields* on `state.json` — e.g. promoting `due_date` into
+  the `notify` items so the due-date sweep runs in TS without parsing `state.md`. Absent on old data →
+  the entrepreneur writes it on its next run; TS reads it once present. **Self-healing.** The early,
+  high-value steps (skip-gate, due-date sweep, fingerprint, edge-notify) are mostly this.
+- **Replacement (the hard one): cut over at a month boundary, do NOT migrate in-flight data.** When
+  structured JSON *replaces* `state.md` as the ledger source-of-truth, let the open months finish to
+  month-close under the OLD markdown path; months started after cutover (2026-07+) are **born
+  structured**. Code supports both during the transition — detect a month's format and route
+  accordingly — and the old path retires once every old-format month is closed.
+
+The **month is the migration unit** (fits the existing open-periods model): never rewrite a live
+month's ledger. A one-time `state.md → JSON` parse is possible if you want the open month on the new
+path immediately, but it re-introduces the brittle markdown parsing we're removing — prefer the
+boundary cutover unless there's a reason.
+
 ## Dashboard / visualization (follows the architecture, not the reverse)
 
 - Today the constellation (`src/projection.ts`) shows **CORE + LLM agents only**; deterministic
@@ -132,3 +153,5 @@ metadata — grow it into the ledger, render `state.md` from it.
   domains. Some clusters are doors, some are domains; don't flatten the distinction.
 - **Incremental migration, skip-gate first** — highest value, cleanest cut, reads existing `state.json`.
 - **Architecture leads the visualization**, not the reverse.
+- **Migration: additive fields self-heal; ledger replacement cuts over at a month boundary** — never
+  rewrite an in-flight month's ledger; the month is the migration unit.
