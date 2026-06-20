@@ -111,20 +111,26 @@ The bigger build. Only safe after Phase 1.
 > catch-all collect/classify sweep (idempotent dedup → near-free when nothing's new) as insurance
 > against poll blind spots. Phase 5 = diet, not amputation.
 
-- [ ] **5a. `inbox-ingest` adapter** (`src/adapters/inbox.ts`) — deterministic, no LLM. Shell
+- [x] **5a. `inbox-ingest` adapter** (`src/adapters/inbox.ts`) — deterministic, no LLM. Shell
       `gws gmail` list with query (`has:attachment` + sender allowlist) + cursor in `channel_state`
       (key `inbox`, last `internalDate`). Enqueue an `inbox` row per candidate with
-      `{messageId, from, subject, snippet, attachments}`. Wire into `scheduler.ts` on `inboxPollCron`
-      (default `*/15 * * * *`).
-- [ ] **5b. `inbox` agent** in `registry.yaml`: `can_be_called_by: [inbox-ingest]`, `tools: Read,Write`,
-      `model: haiku`. Untrusted-text gate — can ONLY order `entrepreneur:intake`. Add `inbox` to
-      `entrepreneur.can_be_called_by`.
-- [ ] **5c. `entrepreneur:intake` task** — task JSON `{messageId, ...}`. Document the two modes
-      (intake vs run) in entrepreneur `context.md`. Same creds, same vendored skills, narrow path.
-- [ ] **5d. Bank-statement → reconcile** — when `inbox` classifies a bank statement, order
-      `entrepreneur` to reconcile (matching) instead of plain intake → event-driven month-end recon
-- [ ] Config: `inboxPollCron` (defaults + example + env map)
-- [ ] `npm run typecheck && npm test`
+      `{messageId, from, subject, snippet, attachments}` — **metadata only, NO attachment bytes at
+      poll time** (lazy download in the run = per-document isolation). Wired into `scheduler.ts` on
+      `inboxPollCron`. New `inboxSenders` config holds the email allowlist (distinct from the chat
+      phone-number `allowedSenders`). Default lister injectable as `GmailList` for tests.
+- [x] **5b. `inbox` agent** in `registry.yaml`: `can_be_called_by: [inbox-ingest]`, `tools: Read,Write`,
+      `model: haiku`. Untrusted-text gate (`agents/inbox/CLAUDE.md`, mirrors `triage`) — can ONLY order
+      `entrepreneur` (intake or reconcile). Added `inbox` to `entrepreneur.can_be_called_by`.
+- [x] **5c. `entrepreneur:intake` task** — task JSON `{mode:"intake", messageId, ...}`. Documented the
+      three modes (run / intake+reconcile / ack) + the *Inbox path* (ONE message per run, lazy
+      download, no operator push) in `agents/entrepreneur/CLAUDE.md`. Same single credentialed
+      entrepreneur, same vendored skills.
+- [x] **5d. Bank-statement → reconcile** — `inbox` emits `mode:"reconcile"` for a statement; the
+      entrepreneur runs the bank-statement match branch instead of plain intake → event-driven
+      month-end recon.
+- [x] Config: `inboxPollCron` (default `*/15 * * * *`) + `inboxSenders` (defaults + example + env map,
+      validated like the other keys).
+- [x] `npm run typecheck && npm test` — 80/80 green, typecheck clean.
 
 ---
 
@@ -139,7 +145,13 @@ The bigger build. Only safe after Phase 1.
 ## Open decisions (resolve when reached)
 
 - Phase 5a poll interval: 15 min assumed — confirm against how fast a new invoice should surface.
-- Whether `intake` and `reconcile` are distinct entrepreneur task names or one parameterized task.
+- ~~Whether `intake` and `reconcile` are distinct entrepreneur task names or one parameterized task.~~
+  **Resolved (Phase 5):** one parameterized task — the entrepreneur reads a `mode` field
+  (`intake`/`reconcile`) on the same JSON task. No new task *name*, no second credentialed agent.
+- **Phase 5 fork flagged:** the inbox allowlist is its own config key `inboxSenders` (email
+  addresses), kept separate from chat's `allowedSenders` (phone numbers / JIDs) — they gate different
+  channels and must not share a list. Empty `inboxSenders` = no `from:` filter (every
+  attachment-bearing message is a candidate); set it in prod to the finance senders.
 
 ## Slices (Phases 1–4 batch)
 
