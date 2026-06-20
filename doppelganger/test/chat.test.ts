@@ -332,7 +332,7 @@ test('isOperator: matches the operator number across +/digits/jid forms; empty n
   assert.equal(isOperator('46736625308@s.whatsapp.net', ''), false); // unconfigured → off
 });
 
-test('ingest: an operator DM bypasses triage and goes straight to chat', () => {
+test('ingest: an operator DM goes through triage, flagged isDirect + fromOperator (no bypass)', () => {
   const db = freshDb();
   const { channel } = memChannel('stub', [
     { conversationId: 'OP', sender: '46736625308@s.whatsapp.net', text: 'boka tandläkare imorgon', ts: '2026-06-13T10:00:00Z', isDirect: true },
@@ -341,32 +341,35 @@ test('ingest: an operator DM bypasses triage and goes straight to chat', () => {
 
   const queued = selectPendingFifo(db);
   assert.equal(queued.length, 1);
-  assert.equal(queued[0].agent, 'chat', 'operator DM skips triage');
-  assert.equal(queued[0].task, 'OP', 'chat task is the bare conversationId');
+  assert.equal(queued[0].agent, 'triage', 'everything goes through triage — one uniform path');
+  const t = JSON.parse(queued[0].task) as { conversationId: string; isDirect: boolean; fromOperator: boolean };
+  assert.equal(t.conversationId, 'OP');
+  assert.equal(t.isDirect, true);
+  assert.equal(t.fromOperator, true, 'operator 1:1 → triage escalates unconditionally');
 });
 
-test('ingest: a GROUP message from the operator still goes through triage', () => {
+test('ingest: a GROUP message from the operator → triage, fromOperator true but isDirect false', () => {
   const db = freshDb();
   const { channel } = memChannel('stub', [
     { conversationId: 'GROUP', sender: '46736625308@s.whatsapp.net', text: 'hej allihop', ts: '2026-06-13T10:00:00Z', isDirect: false },
   ]);
   ingestChat(db, new Map([[channel.name, channel]]), ['+46736625308'], '+46736625308');
 
-  const queued = selectPendingFifo(db);
-  assert.equal(queued.length, 1);
-  assert.equal(queued[0].agent, 'triage', 'group → triage even from the operator');
+  const t = JSON.parse(selectPendingFifo(db)[0].task) as { isDirect: boolean; fromOperator: boolean };
+  assert.equal(t.isDirect, false, 'a group is not a 1:1, so triage applies its judgment');
+  assert.equal(t.fromOperator, true);
 });
 
-test('ingest: a DM from a non-operator (allowlisted family) still goes through triage', () => {
+test('ingest: a DM from a non-operator (family) → triage, isDirect true but fromOperator false', () => {
   const db = freshDb();
   const { channel } = memChannel('stub', [
     { conversationId: 'MOM', sender: '46700000000@s.whatsapp.net', text: 'är vi lediga?', ts: '2026-06-13T10:00:00Z', isDirect: true },
   ]);
   ingestChat(db, new Map([[channel.name, channel]]), [], '+46736625308');
 
-  const queued = selectPendingFifo(db);
-  assert.equal(queued.length, 1);
-  assert.equal(queued[0].agent, 'triage', 'only the operator bypasses; family DMs are gated');
+  const t = JSON.parse(selectPendingFifo(db)[0].task) as { isDirect: boolean; fromOperator: boolean };
+  assert.equal(t.isDirect, true);
+  assert.equal(t.fromOperator, false, 'only the operator gets the unconditional-escalate rule');
 });
 
 test('operatorPushTarget: returns the operator\'s most recent DM thread + channel; ignores groups and unset', () => {

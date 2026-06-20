@@ -48,8 +48,6 @@ export function ingestChat(
   for (const channel of channels.values()) {
     const cursor = getChannelCursor(db, channel.name);
     const { messages, cursor: nextCursor } = channel.poll(cursor);
-    let direct = 0;
-    let gated = 0;
     for (const msg of messages) {
       if (!isAllowed(msg.sender, msg.conversationId, allowlist)) {
         console.log(`[chat-ingest] ${channel.name}: blocked ${msg.sender} (conv ${msg.conversationId}) — not in allowlist`);
@@ -64,25 +62,25 @@ export function ingestChat(
         ts: msg.ts,
         is_direct: msg.isDirect,
       });
-      // A DM from the operator is, by definition, directed at the harness — there's no one else in
-      // the room. Skip triage (the "is this for us?" gate, which only earns its keep in a group) and
-      // hand it straight to chat. Everyone else still goes through triage.
-      const toOperatorDm = msg.isDirect === true && isOperator(msg.sender, operatorNumber);
-      if (toOperatorDm) {
-        insertQueue(db, { agent: 'chat', task: msg.conversationId, parent: null });
-        direct++;
-      } else {
-        insertQueue(db, {
-          agent: 'triage',
-          task: JSON.stringify({ channel: msg.channel, conversationId: msg.conversationId, text: msg.text }),
-          parent: null,
-        });
-        gated++;
-      }
+      // Everything goes through triage — one uniform path, so the gate is exercised constantly and
+      // never rots. We hand triage the room context (1:1 vs group, and whether the sender is the
+      // operator) so it can escalate the operator's own DM unconditionally: a 1:1 with the operator
+      // is by definition for the harness, so triage must never drop it.
+      insertQueue(db, {
+        agent: 'triage',
+        task: JSON.stringify({
+          channel: msg.channel,
+          conversationId: msg.conversationId,
+          text: msg.text,
+          isDirect: msg.isDirect === true,
+          fromOperator: isOperator(msg.sender, operatorNumber),
+        }),
+        parent: null,
+      });
     }
     if (nextCursor !== cursor) setChannelCursor(db, channel.name, nextCursor);
     if (messages.length > 0) {
-      console.log(`[chat-ingest] ${channel.name}: ${direct} operator DM → chat, ${gated} → triage`);
+      console.log(`[chat-ingest] ${channel.name}: ${messages.length} new → triage`);
     }
   }
 }

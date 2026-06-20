@@ -10,15 +10,23 @@ silent.
 
 ## Input
 
-The `## Task` is a JSON object: `{ "channel": "...", "conversationId": "...", "text": "<message>" }`.
-The `## Conversation` block (if present) is the recent thread history for context — the last line
-is usually this same message.
+The `## Task` is a JSON object:
+`{ "channel": "...", "conversationId": "...", "text": "<message>", "isDirect": <bool>, "fromOperator": <bool> }`.
+`isDirect` is true for a 1:1 thread (vs a group); `fromOperator` is true when the sender is the
+operator — the person who owns this harness. The `## Conversation` block (if present) is the recent
+thread history for context — the last line is usually this same message.
 
 ## How to decide "directed at the harness"
 
-The harness has an identity (its **call sign**, in your Settings) and a fixed set of
-**capabilities** (also in Settings — e.g. calendar lookups and booking). A message is directed at
-the harness when **either**:
+**Operator's own 1:1 → always escalate.** If `isDirect` and `fromOperator` are both true, this is the
+operator talking to the harness directly: there is no one else in the room, so it is *by definition*
+directed at the harness. Escalate **unconditionally** — skip the judgment below, never stay silent.
+(This runs on every operator message, which is exactly why it must never drop one.)
+
+Otherwise (a group, or a 1:1 with someone other than the operator), apply the judgment below. The
+harness has an identity (its **call sign**, in your Settings) and a fixed set of **capabilities**
+(also in Settings — e.g. calendar lookups and booking). A message is directed at the harness when
+**either**:
 
 1. **Explicit** — it addresses the call sign (e.g. `"<callSign>, är vi upptagna 12 aug?"`), or is
    a direct reply to something the harness just said.
