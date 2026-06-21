@@ -164,40 +164,47 @@ the root smell. TS should own **structured JSON** as the source of truth; keep a
 view *for the bookkeeper*, not as the thing the machine parses. `state.json` already exists for thin
 metadata — grow it into the ledger, render `state.md` from it.
 
-## Migration & cutover (in-flight months — DON'T skip this)
+## Migration & cutover (stopped-service, single open month)
 
-A state-FORMAT change can't ignore the open month: 2026-06 (and any unclosed prior) already has a
-markdown `state.md` ledger on Drive. Same hazard class as the `is_direct` column + config lockstep.
-Two change-types, two strategies:
+A state-FORMAT change can't ignore the open month: 2026-06 already has a markdown `state.md` ledger on
+Drive (May is closed — only the current month migrates). Two change-types, two strategies:
 
 - **Additive (gentle, no migration).** New *fields* on `state.json` — e.g. promoting `due_date` into
   the `notify` items so the due-date sweep runs in TS without parsing `state.md`. Absent on old data →
   the entrepreneur writes it on its next run; TS reads it once present. **Self-healing.** The early,
   high-value steps (skip-gate, due-date sweep, fingerprint, edge-notify) are mostly this.
-- **Replacement (the hard one): one-time migration on the single box — NO dual-format code.** There
-  is exactly **one install** (the Pi), so a state-format change is a controlled one-time operation,
-  not a fleet rollout. Change the code to the clean target, deploy, then transform the Pi's existing
-  `state.md` → structured JSON **once** (same shape as the `is_direct` backfill). Do **not** burden
-  the code with transitional dual-format support — migrate the *data* to match the *code*. A
-  month-boundary cutover is available if ever wanted, but it is **not** the default: the operator
-  prefers the clean design + a one-time migration over carrying compatibility shims.
+- **Replacement (the hard one): one-time migration with the service stopped — NO dual-format code.**
+  Stopping the service is fine; there is no uptime requirement here. With the daemon down there is no
+  concurrent writer and no self-heal to lose, so the **whole** ordering problem collapses: the only
+  invariant is that **when the service comes back up, Drive holds the format the new code expects.**
+  Migrate the *data* to match the *code*; do **not** burden the running system with transitional
+  dual-format branches.
 
-Because the records are **financial** (they feed the bookkeeper), keep migrations **validated and
-reversible** even while moving fast: diff the migrated JSON against the source `state.md`, and keep
-the old `state.md` (Drive versions it anyway) until the new path is confirmed. Aggressive on design,
-careful on the data.
+**The source of truth is Drive, not the Pi.** Authoritative `state.md` lives at
+`<DRIVE_ROOT>/YYYY-MM/.doppelganger/state.md`; the Pi's `$STAGING_DIR/.state/` copies are a cache. So
+the migration reads/writes **Drive** (2026-06 only) and lets the box re-pull on start.
+
+**Cutover (order between migrate and binary-swap does NOT matter — both just finish before `start`):**
+Use the **`doppelganger-prod`** skill to reach the Pi (Tailscale; stop/start the service, read logs,
+inspect queue/state) for every step that touches prod below.
+
+1. **Stop** the doppelganger service. (Sole writer gone → no collision guard, no in-flight handling.)
+2. **Migrate** Drive `2026-06/.doppelganger/state.md` → structured JSON (throwaway script). Swap the
+   binary to the new code whenever — before or after this step, irrelevant while stopped.
+3. **Diff-validate** the migrated JSON against the source `state.md` (Documents / payment rows).
+4. **Clear the Pi's local `.state` cache** so the box re-pulls from Drive. Load order is local-first
+   (`state.json` especially), so a stale local copy would shadow the migrated Drive state. Nuke the
+   whole `$STAGING_DIR/.state/` dir to be safe.
+5. **Start** the new code.
+
+**Abort + rollback:** if step 3's diff shows any material disagreement, do **not** start — keep
+`state.md` (Drive versions it anyway), roll the binary back via `stable`, fix the migration offline.
+Decide the abort criterion up front, not during the cutover. Records are **financial** (they feed the
+bookkeeper): aggressive on design, careful on the data.
 
 **"No dual-format code" ≠ "no code reads both" (review #3).** The *running system* carries no
 dual-format branches — good. The *one-time migration script* obviously must read old `state.md` and
 write new JSON; that's a throwaway tool, not running-system code. Don't conflate them.
-
-**Sequencing is load-bearing.** Step 2 (TS owns the *write* path) and the migration are entangled:
-once TS owns write, the entrepreneur no longer regenerates the markdown, so the self-heal is gone. So
-the migration runs **before or atomically with** the step-2 cutover, never after. Concretely: stop
-the service → run the migration (markdown → JSON) → diff-validate → start the new code. **Abort
-criterion + rollback:** if the diff shows any material disagreement in the Documents / payment rows
-mid-month, abort — keep `state.md`, roll the code back via `stable`, re-run the entrepreneur on the
-markdown path, fix the migration offline. Decide the abort criterion up front, not during the cutover.
 
 ## Dashboard / visualization (follows the architecture, not the reverse)
 
