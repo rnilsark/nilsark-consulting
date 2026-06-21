@@ -8,11 +8,18 @@ conceptual/visual model that follows. Survives context resets — **update as yo
 ## Status
 
 - **Phase:** DESIGN ONLY — nothing built. Conceptual model agreed; no code, no migration started.
-- **Last updated:** 2026-06-20
-- **Motivation:** a quiet daily `entrepreneur` run costs ~$1.14 / 48 turns doing **procedure** (list,
-  dedup, re-fetch, date math, hashing) at LLM prices. The agent is a god-object: orchestration +
-  state I/O + classification + matching + prose, all in one `claude -p`. LLMs are for judgment;
-  `if`-statements are not.
+- **Last updated:** 2026-06-21 (incorporated an external plan review — see the four review points
+  woven through Motivation, Harness extensions #2, Safety, and Migration).
+- **Why — read this first, the framing sets the scope (review #1):** the driver is **architecture,
+  not cost.** The win is determinism, testability, and decomposing the god-object (one `claude -p`
+  doing orchestration + state I/O + classification + matching + prose), and retiring the
+  markdown-reparse smell. LLMs are for judgment; `if`-statements are not. The ~$1.14/48-turn quiet
+  run (~$35/mo) is a **symptom** that confirms the diagnosis — it is *not* the justification; $35/mo
+  would never pay for a financial-records migration on its own.
+- **Severability:** if you ONLY want the no-op spend gone, do **step 1 (the TS skip-gate) and stop** —
+  it kills the cost with none of the cluster reframe. The full decomposition is an architecture
+  investment; buy it for quality, not for the dollar figure. Be explicit which you're buying — they
+  justify very different scope.
 
 ## The principle
 
@@ -66,10 +73,37 @@ run collapses to a few cheap TS ops.
    A `classify-extract` agent must return `{type, supplier, amount, due_date, …}` for the TS
    orchestrator to act on. Add a structured-result field to the `out.json` contract — agents already
    write `out.json`, so this is an extension, not a new mechanism.
-2. **Keep judgment as dispatched agents, NOT a direct Anthropic API call.** A bare API call with
-   structured outputs would be cheaper per-call, but it bypasses the queue/registry/agent model —
-   that is the thing that would break modularity. Stay in the agent model; the win comes from
-   *removing the procedure*, not from a cheaper call style.
+2. **Where judgment runs — sized, NOT asserted (review #2).** A bare Anthropic API call with native
+   structured outputs is cheaper, lower-latency, and schema-enforced per classify; a dispatched
+   `claude -p` agent pays cold-start + queue overhead. Split by whether the judgment needs tools:
+   - **Tool-USING judgment (touches creds — credentialed reconcile / draft work) → stays a dispatched
+     agent**, for the enforced `--allowedTools` gate. Non-negotiable.
+   - **Tool-LESS judgment (`classify-extract` of a document already in hand — no creds, no tools) → a
+     direct call is viable and probably better.** The agent channel buys it nothing here *except*
+     **observability** (a dashboard node + a cost event), which `finance.ts` can emit itself. Don't
+     force pure judgment through `claude -p` cold-start just to stay visible.
+   - Note extension #1 (structured return on `out.json`) is essentially *structured-outputs-via-the-
+     agent-channel* — right for the tool-using agents, redundant for a tool-less classify that could
+     just call the API. **OPEN:** size per-call cost/latency vs the observability you'd hand-roll, and
+     weigh that a direct path adds an API key + SDK to the box (a real second mechanism), before
+     committing classify-extract to one or the other. Earlier this doc *asserted* "keep everything an
+     agent"; that was under-justified — it's a sized trade, not a settled rejection.
+
+## Safety: the skip-gate removes a self-correcting net (review #4 — do this BEFORE step 1)
+
+The god-object's wastefulness *is* its safety net: re-deriving everything every run means it can't
+permanently drop a document — a miss self-corrects on the next run. The skip-gate removes that net,
+and the records are **financial**: a skip-gate **false-negative = a silently dropped invoice = a
+missing verification for the bookkeeper**, with tax consequences. And the gate's judgment quality is
+not measured yet. So before step 1 ships, the gate must be:
+
+- **Conservative by construction** — skip only when *provably* nothing new (exact cursor + dedup); on
+  ANY ambiguity, fire the LLM. A wasted run is cheap; a dropped invoice is not.
+- **Logged for audit** — record every skip decision and its inputs, so you can review "what did TS
+  skip" over the first months and catch a bad gate *before* trusting it.
+- **Backstopped** — keep a periodic full sweep (e.g. weekly — the Phase-5 Option-B backstop) running
+  even with the skip-gate, so anything wrongly skipped surfaces within days, not never. Retire the
+  backstop only once the audit log shows the gate is trustworthy.
 
 ## Migration order (incremental — do NOT boil the ocean)
 
@@ -110,6 +144,18 @@ reversible** even while moving fast: diff the migrated JSON against the source `
 the old `state.md` (Drive versions it anyway) until the new path is confirmed. Aggressive on design,
 careful on the data.
 
+**"No dual-format code" ≠ "no code reads both" (review #3).** The *running system* carries no
+dual-format branches — good. The *one-time migration script* obviously must read old `state.md` and
+write new JSON; that's a throwaway tool, not running-system code. Don't conflate them.
+
+**Sequencing is load-bearing.** Step 2 (TS owns the *write* path) and the migration are entangled:
+once TS owns write, the entrepreneur no longer regenerates the markdown, so the self-heal is gone. So
+the migration runs **before or atomically with** the step-2 cutover, never after. Concretely: stop
+the service → run the migration (markdown → JSON) → diff-validate → start the new code. **Abort
+criterion + rollback:** if the diff shows any material disagreement in the Documents / payment rows
+mid-month, abort — keep `state.md`, roll the code back via `stable`, re-run the entrepreneur on the
+markdown path, fix the migration offline. Decide the abort criterion up front, not during the cutover.
+
 ## Dashboard / visualization (follows the architecture, not the reverse)
 
 - Today the constellation (`src/projection.ts`) shows **CORE + LLM agents only**; deterministic
@@ -149,8 +195,17 @@ careful on the data.
 
 - **LLM = judgment, TS = procedure** — apply the existing adapter/agent split to the entrepreneur;
   don't invent a new pattern.
-- **Keep the modular agent model** — judgment stays as queue-dispatched `claude -p` agents, not a
-  direct API call (that's what would break modularity).
+- **Driver is architecture, not cost (review #1)** — determinism / testability / god-object
+  decomposition; the ~$35/mo is a symptom. The skip-gate (step 1) is **severable** as the cost-only win.
+- **Where judgment runs is OPEN, not settled (review #2)** — tool-USING judgment stays a dispatched
+  agent (enforced gate); tool-LESS classify-extract may be a direct structured-output API call, since
+  the agent channel only buys observability there. Size it before committing; don't assert.
+- **The skip-gate must restore the net it removes (review #4)** — conservative-by-construction
+  (unsure → fire the LLM), audit-logged, with a periodic backstop sweep until the gate is trusted. A
+  dropped invoice (missing verification) outweighs a wasted run.
+- **Migration sequencing (review #3)** — the running system carries no dual-format branches, but the
+  one-time migration script reads both; it runs before/atomically with the step-2 write cutover, with
+  a pre-agreed abort criterion + `stable` rollback.
 - **Entry clusters vs domain clusters** — `chat`/`schedule` route inward; finance/calendar are
   domains. Some clusters are doors, some are domains; don't flatten the distinction.
 - **Incremental migration, skip-gate first** — highest value, cleanest cut, reads existing `state.json`.
