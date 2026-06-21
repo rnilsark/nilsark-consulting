@@ -42,6 +42,7 @@ interface OperatorConfig {
   staleRunHours: number;
   inboxPollCron: string;
   inboxSenders: string[];
+  financeBackstopMaxAgeHours: number;
 }
 
 const defaults: OperatorConfig = {
@@ -71,6 +72,10 @@ const defaults: OperatorConfig = {
   // Email senders whose `has:attachment` mail the inbox poll surfaces. Empty = no `from:` filter
   // (every attachment-bearing message is a candidate) — set this to the finance senders in prod.
   inboxSenders: [],
+  // The finance skip-gate's backstop window: if no successful entrepreneur run has landed within
+  // this many hours, the gate fires unconditionally (the periodic full sweep that catches anything
+  // wrongly skipped). 168h = 7 days. Lower it to distrust the gate harder; never disable it.
+  financeBackstopMaxAgeHours: 168,
 };
 
 /** The env var that overrides each operator key (keys not listed are file/default only). */
@@ -97,6 +102,7 @@ const envVar: Record<keyof OperatorConfig, string> = {
   staleRunHours: 'DOPPELGANGER_STALE_RUN_HOURS',
   inboxPollCron: 'DOPPELGANGER_INBOX_POLL_CRON',
   inboxSenders: 'DOPPELGANGER_INBOX_SENDERS',
+  financeBackstopMaxAgeHours: 'DOPPELGANGER_FINANCE_BACKSTOP_MAX_AGE_HOURS',
 };
 
 function fail(msg: string): never {
@@ -208,6 +214,7 @@ function resolve(home: string): OperatorConfig {
     staleRunHours: posInt(raw('staleRunHours'), 'staleRunHours'),
     inboxPollCron: cronExpr(raw('inboxPollCron'), 'inboxPollCron'),
     inboxSenders: strList(raw('inboxSenders'), 'inboxSenders'),
+    financeBackstopMaxAgeHours: posInt(raw('financeBackstopMaxAgeHours'), 'financeBackstopMaxAgeHours'),
   };
 }
 

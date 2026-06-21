@@ -7,9 +7,10 @@ conceptual/visual model that follows. Survives context resets — **update as yo
 
 ## Status
 
-- **Phase:** DESIGN ONLY — nothing built. Conceptual model agreed; no code, no migration started.
-- **Last updated:** 2026-06-21 (incorporated an external plan review — see the four review points
-  woven through Motivation, Harness extensions #2, Safety, and Migration).
+- **Phase:** BUILDING — **step 1 (the skip-gate) shipped**; steps 2–4 not started. The conceptual
+  model is unchanged; this is the incremental, severable cost-and-determinism cut, with its safety
+  net built in from the first commit (review #4).
+- **Last updated:** 2026-06-21 (built step 1 — see "Step 1 — built" below).
 - **Why — read this first, the framing sets the scope (review #1):** the driver is **architecture,
   not cost.** The win is determinism, testability, and decomposing the god-object (one `claude -p`
   doing orchestration + state I/O + classification + matching + prose), and retiring the
@@ -105,11 +106,53 @@ not measured yet. So before step 1 ships, the gate must be:
   even with the skip-gate, so anything wrongly skipped surfaces within days, not never. Retire the
   backstop only once the audit log shows the gate is trustworthy.
 
+## Step 1 — built (2026-06-21)
+
+The skip-gate is live as `doppelganger/src/adapters/finance.ts` — the finance orchestrator-star.
+Shape, so a cold context doesn't re-derive it:
+
+- **Wiring.** `entrepreneur/run` was removed from the unconditional `schedule.ts` `jobs`; the
+  `financeHeartbeatCron` now calls `maybeEnqueueFinanceRun(db)`, which enqueues the run ONLY when work
+  is (or might be) due. `decideGate` is a pure function; I/O (state read, audit log, clock) is injected
+  for tests (`test/finance.test.ts`, 22 cases).
+- **Conservative by construction (review #4).** Fires on ANY ambiguity: state.json missing/unreadable,
+  `version ≠ 2`, a null stored fingerprint, an actionable item with a missing/non-ISO `due_date`, or a
+  recomputed fingerprint ≠ the stored one. Skips ONLY when every open period's fresh fingerprint
+  matches its stored one.
+- **Backstop (review #4).** Reuses `lastEntrepreneurSuccess`: if no successful run landed within
+  `financeBackstopMaxAgeHours` (default 168h / 7d), it fires unconditionally — the periodic full sweep.
+  Also dedups: never piles a second `run` on a pending/running one.
+- **Audit log (review #4).** Every decision (fire/skip + reason + ts) appends to
+  `$DOPPELGANGER_HOME/finance-gate.jsonl` — review "what did TS skip" before trusting the gate; only
+  then consider lowering the backstop.
+- **The fingerprint is a PINNED cross-language contract.** TS (`computeFingerprint`) and the
+  entrepreneur prose must hash byte-for-byte identically or the gate over-fires (cheap) or wrongly
+  skips a due push (a miss). Pinned: actionable = non-acked items with bucket `due_soon`/`overdue`
+  (items > 7d out are excluded); token = `"<docKey>|<bucket>"`; sort by `due_date`,`supplier`;
+  newline-join; sha256; first 16 hex; empty set → `e3b0c44298fc1c14`. **If you touch one side, touch
+  both and re-run the known-vector test.**
+- **The additive data migration (slice 1b, self-healing).** `notify.items` entries now mirror
+  `supplier`/`amount`/`due_date` (amount = the docKey's amount string, verbatim) so the gate reads
+  `state.json` alone. Critically, the **inbox-intake path now projects a newly-filed unpaid item into
+  `notify.items` but deliberately leaves `notify.fingerprint` stale** — that staleness is the signal
+  the daily gate fires on. (If intake advanced the fingerprint, the gate would skip and the operator
+  would never hear about the new invoice.) Old data with no `due_date` → the gate fires (self-heals on
+  the next run that rewrites the item).
+- **Known coverage edges (by design, backstop is the net):** standing EXPORT items and a month
+  becoming close-ready don't change the fingerprint, so the *daily* gate won't fire for them — the
+  weekly backstop and the event-driven inbox path cover those, exactly the net review #4 mandates.
+  Likewise an *acknowledged* item silently going overdue is excluded from the fingerprint (acked items
+  never are); the bank-reconcile path or the backstop catches it. Watch the audit log to confirm these
+  hold before trusting the gate.
+
 ## Migration order (incremental — do NOT boil the ocean)
 
-1. **Skip-gate + due-date sweep + fingerprint + edge-notify → TS.** Reads `state.json` (already
+1. **[DONE] Skip-gate + due-date sweep + fingerprint + edge-notify → TS.** Reads `state.json` (already
    structured). Biggest, cleanest cut: kills the no-op cost, and gates the LLM on "is there real
-   work." (This is "Phase 5 follow-up #3" from the interactive-finance plan, generalized.)
+   work." (This is "Phase 5 follow-up #3" from the interactive-finance plan, generalized.) See "Step 1
+   — built" above. NOTE: the gate decides fire/skip; the *push itself* still runs in the LLM. Moving
+   the fingerprint+todo composition fully into TS (so a push fires with NO LLM) is a later slice, to be
+   taken only once the audit log shows the gate is trustworthy.
 2. **State I/O → TS.** Own `state.md`/`state.json` read/write/collision-guard in code.
 3. **Gmail list + dedup + download → TS.** Extend `inbox.ts`; hand the LLM a file, not a mailbox.
 4. **Shrink the agent(s)** to classify-extract / reconcile / summarize only.
@@ -209,6 +252,10 @@ markdown path, fix the migration offline. Decide the abort criterion up front, n
 - **Entry clusters vs domain clusters** — `chat`/`schedule` route inward; finance/calendar are
   domains. Some clusters are doors, some are domains; don't flatten the distinction.
 - **Incremental migration, skip-gate first** — highest value, cleanest cut, reads existing `state.json`.
+- **Step 1 shipped as `finance.ts` (2026-06-21)** — gate decides fire/skip (LLM still does the push);
+  conservative-by-construction + backstop + audit log + dedup; fingerprint pinned byte-for-byte across
+  TS and the entrepreneur prose; `notify.items` grew additive `supplier`/`amount`/`due_date`, and the
+  inbox-intake path feeds it while leaving the fingerprint stale on purpose. See "Step 1 — built".
 - **Architecture leads the visualization**, not the reverse.
 - **Migration: single Pi install → one-time hard migration, NO dual-format code.** Additive fields
   self-heal; for a ledger-format replacement, change the code and migrate the Pi's data to match (like

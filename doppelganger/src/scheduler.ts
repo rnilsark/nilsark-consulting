@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import { enqueue, jobs } from './adapters/schedule.ts';
 import { runHealthcheck } from './adapters/health.ts';
 import { ingestChat } from './adapters/chat.ts';
+import { maybeEnqueueFinanceRun } from './adapters/finance.ts';
 import { ingestInbox } from './adapters/inbox.ts';
 import { config } from './config.ts';
 import type { Db } from './db.ts';
@@ -29,6 +30,15 @@ export function startScheduler(db: Db, channels: Map<string, Channel>): void {
     }
   });
   console.log(`[scheduler] healthcheck @ "${config.healthcheckCron}"`);
+
+  cron.schedule(config.financeHeartbeatCron, () => {
+    try {
+      maybeEnqueueFinanceRun(db); // gated enqueue — see finance.ts
+    } catch (err) {
+      console.error('[scheduler] finance heartbeat gate failed:', err);
+    }
+  });
+  console.log(`[scheduler] finance heartbeat gate @ "${config.financeHeartbeatCron}"`);
 
   cron.schedule(config.inboxPollCron, () => {
     try {

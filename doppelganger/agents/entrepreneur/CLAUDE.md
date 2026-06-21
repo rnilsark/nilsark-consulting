@@ -161,10 +161,18 @@ into a new bucket — any of these warrant an operator push.
 "<docKey>": {
   "bucket": "due_soon",
   "acknowledged": false,
-  "last_notified": "YYYY-MM-DD"
+  "last_notified": "YYYY-MM-DD",
+  "supplier": "Fortnox",
+  "amount": "450",
+  "due_date": "YYYY-MM-DD"
 }
 ```
 
+`supplier`, `amount`, `due_date`: the actionable item's own fields, **mirrored here verbatim** so the
+deterministic TS skip-gate (`finance.ts`) can recompute the fingerprint from `state.json` alone —
+without re-parsing `state.md`. `amount` is the **same string used to build the docKey** (do not
+reformat it). These are required on every item you write; a missing/non-ISO `due_date` makes the gate
+unable to prove the set, so it conservatively fires a full run.
 `bucket`: `due_soon` (due ≤ 7 days) | `overdue` (past due date and unpaid).
 `acknowledged`: set to `true` when the operator acks payment (via chat ack loop, see below). Suppresses
 the item from future pushes until the bank statement either confirms it (`paid`) or contradicts it
@@ -286,7 +294,15 @@ THIS_MONTH=$(date +%Y-%m); TODAY=$(date +%Y-%m-%d)
      mark matches `paid`, record the transactions, archive the statement to the period's
      `.doppelganger/`, and set `state.json` `export_status[P] = reconciled` (or `dropped` if present
      but nothing matched). This is what makes month-end reconciliation event-driven.
-4. **Persist** the period's state.md (collision guard per the State contract) and `state.json`.
+4. **Project into `notify.items` (intake of an unpaid item only).** If you filed an `unpaid`
+   leverantörsfaktura/skattekonto, add/update its `notify.items` entry for the period (docKey,
+   `bucket`, `acknowledged: false`, `last_notified: null`, and mirrored `supplier`/`amount`/
+   `due_date`). A `reconcile` that marked items `paid` → **remove** those items' `notify.items`
+   entries. **Do NOT touch `notify.fingerprint`** — leave it stale on purpose: the deterministic daily
+   gate (`finance.ts`) compares a fresh fingerprint against this stale one, sees the change, and fires
+   the daily `run` that actually composes the todo and pushes. (If you advanced the fingerprint here,
+   the gate would skip and the operator would never be notified of the new invoice.)
+5. **Persist** the period's state.md (collision guard per the State contract) and `state.json`.
    **Do not** emit an operator push and **do not** compute the todo fingerprint — the daily `run`
    owns the todo and the edge-notify. Write `out.json`: `status` (`success`, or `flagged` for an
    `unknown`/anomaly, or `error` on a blocker) + a short Swedish `summary`. No `replies`.
@@ -350,12 +366,22 @@ Compose a single todo across the periods, **grouped by month**, oldest first. Pe
 
 **Compute the actionable set and fingerprint:**
 
-The actionable set is every PAY item that is `unpaid` or `overdue` and not `acknowledged`. Build a
-canonical string — sort items by `due_date` then `supplier`, then concatenate
-`"<supplier>|<amount>|<due_date>|<bucket>"` — and SHA-256-hash it (first 16 hex chars is sufficient):
+The actionable set is every PAY item that is `unpaid` or `overdue`, **not `acknowledged`**, and whose
+bucket is `due_soon` or `overdue` (an item due > 7 days out is NOT in the set — it enters when it
+crosses into `due_soon`). **The fingerprint formula is a pinned contract — `finance.ts` recomputes it
+byte-for-byte to decide whether to even start you, so follow it exactly:**
+
+1. For each actionable item, the **token** is `"<docKey>|<bucket>"` — i.e. the docKey
+   (`"<supplier>|<amount>|<due_date>"`) followed by `|` and the recomputed bucket. (Since the docKey
+   already ends in `<due_date>`, the token reads `supplier|amount|due_date|bucket`.)
+2. **Sort** the tokens by `due_date` ascending, then `supplier` ascending.
+3. **Join** them with a single newline (`\n`) — one token per line, no trailing newline.
+4. SHA-256 the joined string and take the first 16 hex chars. An empty set hashes the empty string
+   (→ `e3b0c44298fc1c14`).
 
 ```bash
-FINGERPRINT=$(echo "$CANONICAL_ACTIONABLE" | sha256sum | cut -c1-16)
+# CANONICAL_ACTIONABLE: the sorted tokens, one per line, newline-joined, no trailing newline.
+FINGERPRINT=$(printf '%s' "$CANONICAL_ACTIONABLE" | sha256sum | cut -c1-16)
 ```
 
 **Threshold-crossing and notify-items update (per PAY item):**
@@ -363,8 +389,11 @@ FINGERPRINT=$(echo "$CANONICAL_ACTIONABLE" | sha256sum | cut -c1-16)
 For each unpaid/overdue item, derive its docKey (`"<supplier>|<amount>|<due_date>"`) and bucket
 (`due_soon` if due ≤ 7 days; `overdue` if past due). Then look up the existing `notify.items[docKey]`:
 
-- **New item (not in `notify.items`):** add it with `acknowledged: false`, `last_notified: null`, and
-  the current `bucket`. It will be included in the push (if fingerprint changed).
+- **New item (not in `notify.items`):** add it with `acknowledged: false`, `last_notified: null`, the
+  current `bucket`, and the mirrored `supplier`/`amount`/`due_date` (amount = the docKey's amount
+  string, verbatim). It will be included in the push (if fingerprint changed).
+- **Existing item:** keep `supplier`/`amount`/`due_date` in sync with the docKey, and update `bucket`.
+- **Paid / no-longer-actionable item:** remove its `notify.items` entry (it drops out of the set).
 - **Bucket unchanged and `acknowledged: true`:** suppress — do not push for this item.
 - **Bucket unchanged and `acknowledged: false` and `last_notified` is today:** already pushed today —
   do not push again this run.
