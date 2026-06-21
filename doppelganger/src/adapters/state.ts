@@ -84,10 +84,24 @@ export function emptyMonthState(month: string): MonthState {
  * Read paths already throw on any failure; the write path uses this to throw on auth specifically
  * rather than collapsing it into a recoverable `error` outcome.
  */
-const AUTH_HINTS = ['unauthenticated', 'unauthorized', 'token', 'login', 'auth'];
+// Matched against gws's RAW error text (filenames, hostnames and all), so these are anchored,
+// credential-specific phrases — deliberately NOT the bare substrings the agent's prose guard uses.
+// A loose includes('auth'|'token'|'login') false-positives on ordinary errors that merely contain
+// those letters (a hostname `author-api…`, `token bucket exhausted`, a filename `..._login_….pdf`),
+// and on the write path a false positive THROWS and loses the run's ledger update — so it must be tight.
+const AUTH_PATTERNS = [
+  /unauthenticated/,
+  /unauthorized/,
+  /invalid authentication/,
+  /invalid[ _-]?grant/,
+  /\blogin\b/,
+  /token (has )?expired/,
+  /(expired|invalid|missing|revoked) (access |refresh |id )?token/,
+  /re-?authenticat/,
+];
 export function isAuthFailure(detail: string): boolean {
   const d = detail.toLowerCase();
-  return AUTH_HINTS.some((h) => d.includes(h));
+  return AUTH_PATTERNS.some((p) => p.test(d));
 }
 
 // ---- parse (markdown → model) ------------------------------------------------
@@ -143,7 +157,9 @@ function summaryValue(lines: string[], label: string): string {
 
 /** Parse a `state.md` document into the typed model. Tolerant: missing sections → empty. */
 export function parseStateMd(md: string): MonthState {
-  const monthMatch = /^#\s*State:\s*(\S+)/m.exec(md);
+  // `[ \t]*` (NOT `\s*`) so a blank value can't let the capture cross a newline and grab a token from
+  // the next line — that would defeat readMonthState's corrupt/partial-download guard (month==='').
+  const monthMatch = /^#[ \t]*State:[ \t]*(\S+)/m.exec(md);
   const month = monthMatch ? monthMatch[1] : '';
   const secs = sections(md);
 
@@ -265,8 +281,11 @@ export const defaultGwsRunner: GwsRunner = (args) => {
   const res = spawnSync('gws', args, { encoding: 'utf8', timeout: 30_000, maxBuffer: 16 * 1024 * 1024 });
   if (res.error) return { ok: false, stdout: '', detail: res.error.message };
   if (res.status !== 0) {
-    const output = (res.stdout ?? '') + (res.stderr ?? '');
-    return { ok: false, stdout: res.stdout ?? '', detail: output.slice(0, 200) };
+    const output = ((res.stdout ?? '') + (res.stderr ?? '')).trim();
+    // Never return an empty detail on a failure — fall back to the exit status so the failure is at
+    // least diagnosable (and isAuthFailure has a non-empty string to inspect).
+    const detail = output ? output.slice(0, 200) : `gws exited with status ${String(res.status)}`;
+    return { ok: false, stdout: res.stdout ?? '', detail };
   }
   return { ok: true, stdout: res.stdout ?? '', detail: '' };
 };

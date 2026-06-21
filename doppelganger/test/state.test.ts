@@ -356,6 +356,62 @@ test('isAuthFailure: matches credential keywords, ignores ordinary errors', () =
   assert.equal(isAuthFailure('401 Unauthorized'), true);
   assert.equal(isAuthFailure('invalid token'), true);
   assert.equal(isAuthFailure('please login again'), true);
+  assert.equal(isAuthFailure('Request had invalid authentication credentials'), true);
+  assert.equal(isAuthFailure('UNAUTHENTICATED'), true);
   assert.equal(isAuthFailure('quota exceeded'), false);
   assert.equal(isAuthFailure('network timeout'), false);
+});
+
+test('isAuthFailure: does NOT false-positive on errors that merely contain the letters', () => {
+  // These must stay retryable `error` outcomes on the write path, not throw.
+  assert.equal(isAuthFailure('Failed to resolve host author-api.googleapis.com'), false);
+  assert.equal(isAuthFailure('rateLimitExceeded for token bucket'), false);
+  assert.equal(isAuthFailure('could not upload Faktura_login_2908.pdf: 503'), false);
+  assert.equal(isAuthFailure('request to /authorize/refresh timed out'), false);
+  assert.equal(isAuthFailure('backendError: tokenizer service unavailable'), false);
+});
+
+test('parseStateMd: a blank value after "# State:" does NOT capture the next line (guard intact)', () => {
+  // Regression for the `\s*`→`[ \t]*` fix: a truncated download must yield month '' so the corrupt
+  // guard fires — not capture "##" off the following line.
+  const md = '# State:\n## Documents\n| file | type |\n|---|---|\n';
+  assert.equal(parseStateMd(md).month, '');
+});
+
+test('readMonthState: a header-on-its-own-line truncation is still rejected as corrupt', () => {
+  const { run } = scriptedRunner([() => ok(JSON.stringify({ files: [{ id: 'F1', headRevisionId: 'R1' }] }))]);
+  assert.throws(
+    () => readMonthState('2026-06', 'FOLDER', { run, download: () => '# State:\n## Documents\n' }),
+    /corrupt\/partial/,
+  );
+});
+
+test('readMonthState: a download gws failure (via the real downloader) propagates', () => {
+  // Only `run` injected → exercises makeDriveDownloader's own res.ok===false throw branch.
+  const run: GwsRunner = (args) => {
+    if (args[2] === 'list') return ok(JSON.stringify({ files: [{ id: 'F1', headRevisionId: 'R1' }] }));
+    if (args.includes('-o')) return fail('media 404');
+    throw new Error(`unexpected: ${args.join(' ')}`);
+  };
+  assert.throws(() => readMonthState('2026-06', 'FOLDER', { run }), /download F1 failed: media 404/);
+});
+
+test('renderStateMd: a populated document row is byte-pinned (cell spacing + verbatim values)', () => {
+  const rendered = renderStateMd(parseStateMd(FIXTURE));
+  assert.ok(
+    rendered.includes(
+      '| Faktura_2908.pdf | leverantörsfaktura | Elwa AB | 2513.00 | SEK | 2026-06-14 | 2026-06-04 | 290866 | BG 5542-9468 | 502.50 | 2026-06/Leverantörsfakturor/ | 1IMyW-J7-O3WQ7tmKEAd2ta56O3XzVK5m | overdue | no |',
+    ),
+    'populated row format drifted',
+  );
+});
+
+test('round-trip: a closed month (Month-close sent/date set) round-trips both fields', () => {
+  const s = emptyMonthState('2026-05');
+  s.monthCloseSent = 'yes';
+  s.monthCloseDate = '2026-06-03';
+  const rendered = renderStateMd(s);
+  assert.ok(rendered.includes('- Month-close sent: yes'));
+  assert.ok(rendered.includes('- Month-close date: 2026-06-03')); // leading space present when set
+  assert.deepEqual(parseStateMd(rendered), s);
 });
