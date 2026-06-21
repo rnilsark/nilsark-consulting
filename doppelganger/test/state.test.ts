@@ -362,6 +362,17 @@ test('isAuthFailure: matches credential keywords, ignores ordinary errors', () =
   assert.equal(isAuthFailure('network timeout'), false);
 });
 
+test('isAuthFailure: matches Google OAuth error codes (underscores + word order)', () => {
+  // These slipped through an earlier too-tight rewrite; they are the most common live-credential
+  // failures, so a miss would make the write path treat a dead credential as retryable.
+  assert.equal(isAuthFailure('invalid_grant'), true);
+  assert.equal(isAuthFailure('invalid_token'), true);
+  assert.equal(isAuthFailure('ACCESS_TOKEN_EXPIRED'), true);
+  assert.equal(isAuthFailure('Token has been expired or revoked'), true);
+  assert.equal(isAuthFailure('insufficient authentication scopes'), true);
+  assert.equal(isAuthFailure('The credentials do not contain the necessary fields'), true);
+});
+
 test('isAuthFailure: does NOT false-positive on errors that merely contain the letters', () => {
   // These must stay retryable `error` outcomes on the write path, not throw.
   assert.equal(isAuthFailure('Failed to resolve host author-api.googleapis.com'), false);

@@ -89,15 +89,23 @@ export function emptyMonthState(month: string): MonthState {
 // A loose includes('auth'|'token'|'login') false-positives on ordinary errors that merely contain
 // those letters (a hostname `author-api…`, `token bucket exhausted`, a filename `..._login_….pdf`),
 // and on the write path a false positive THROWS and loses the run's ledger update — so it must be tight.
+// Separator-agnostic (`[ _-]?`) because Google's OAuth errors use underscores (`invalid_grant`,
+// `invalid_token`, `ACCESS_TOKEN_EXPIRED`) while its prose messages use spaces (`Token has been
+// expired or revoked`). `\blogin\b` stays word-bounded so an underscore filename (`..._login_...pdf`)
+// does NOT match — `_` is a word char, so there's no boundary inside it.
 const AUTH_PATTERNS = [
   /unauthenticated/,
   /unauthorized/,
-  /invalid authentication/,
   /invalid[ _-]?grant/,
+  /invalid authentication/,
+  /authentication (failed|required|error)/,
+  /insufficient authentication/,
+  /\bcredentials?\b/,
   /\blogin\b/,
-  /token (has )?expired/,
-  /(expired|invalid|missing|revoked) (access |refresh |id )?token/,
+  /\blog[ -]in\b/,
   /re-?authenticat/,
+  /token[ _-]?(has[ _-]?)?(been[ _-]?)?(expired|revoked|invalid)/,
+  /(expired|invalid|missing|revoked)[ _-]?(access|refresh|id)?[ _-]?token/,
 ];
 export function isAuthFailure(detail: string): boolean {
   const d = detail.toLowerCase();
