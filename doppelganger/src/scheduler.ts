@@ -2,7 +2,7 @@ import cron from 'node-cron';
 import { enqueue, jobs } from './adapters/schedule.ts';
 import { runHealthcheck } from './adapters/health.ts';
 import { ingestChat } from './adapters/chat.ts';
-import { maybeEnqueueFinanceRun } from './adapters/finance.ts';
+import { maybeEnqueueFinanceRun, operatorToday, shadowValidateMonth } from './adapters/finance.ts';
 import { ingestInbox } from './adapters/inbox.ts';
 import { config } from './config.ts';
 import type { Db } from './db.ts';
@@ -34,6 +34,13 @@ export function startScheduler(db: Db, channels: Map<string, Channel>): void {
   cron.schedule(config.financeHeartbeatCron, () => {
     try {
       maybeEnqueueFinanceRun(db); // gated enqueue — see finance.ts
+      try {
+        // step 2 shadow check (read-only): prove the TS ledger round-trips the live book
+        const r = shadowValidateMonth(operatorToday().slice(0, 7));
+        console.log(`[state-shadow] ${r.month} found=${r.found} clean=${r.clean} — ${r.detail}`);
+      } catch (err) {
+        console.error('[state-shadow] failed:', err);
+      }
     } catch (err) {
       console.error('[scheduler] finance heartbeat gate failed:', err);
     }

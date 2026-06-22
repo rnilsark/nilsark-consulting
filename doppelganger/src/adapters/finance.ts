@@ -3,7 +3,15 @@ import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.ts';
 import { insertQueue, lastEntrepreneurSuccess, type Db } from '../db.ts';
-import { defaultGwsRunner, makeDriveDownloader, type DriveDownloader, type GwsRunner } from './state.ts';
+import {
+  defaultGwsRunner,
+  makeDriveDownloader,
+  parseStateMd,
+  renderStateMd,
+  resolveStateFile,
+  type DriveDownloader,
+  type GwsRunner,
+} from './state.ts';
 
 // The finance orchestrator-star (deterministic, no LLM). It decides whether the daily
 // `entrepreneur/run` heartbeat needs to fire at all — the skip-gate from the star-clusters plan,
@@ -213,6 +221,49 @@ export function readFinanceStateFromDrive(deps: DriveStateDeps = {}): FinanceSta
     return JSON.parse(download(fileId)) as FinanceState;
   } catch {
     return null;
+  }
+}
+
+export interface ShadowReport {
+  month: string;
+  found: boolean;
+  clean: boolean;
+  detail: string;
+}
+
+/**
+ * SHADOW validation (step 2, read-only): fetch the live `state.md` for a month from Drive, parse it
+ * into the typed ledger, render it back, and re-parse — confirming the TS ledger model round-trips the
+ * REAL book without loss. Writes nothing; this is how we prove `state.ts` against production data
+ * before letting it own the write path. Any resolution miss is reported as `found:false` (benign),
+ * never throws — best-effort by design.
+ */
+export function shadowValidateMonth(month: string, deps: DriveStateDeps = {}): ShadowReport {
+  const run = deps.run ?? defaultGwsRunner;
+  const download = deps.download ?? makeDriveDownloader(run);
+  try {
+    const rootId = (deps.rootFolderId ?? readDriveRootFolderId)();
+    if (!rootId) return { month, found: false, clean: false, detail: 'no drive root folder id' };
+    const monthId = findChildId(rootId, month, DRIVE_FOLDER_MIME, run);
+    if (!monthId) return { month, found: false, clean: true, detail: 'no month folder (not started)' };
+    const doppId = findChildId(monthId, '.doppelganger', DRIVE_FOLDER_MIME, run);
+    if (!doppId) return { month, found: false, clean: true, detail: 'no .doppelganger folder' };
+    const ref = resolveStateFile(doppId, run);
+    if (!ref) return { month, found: false, clean: true, detail: 'no state.md yet' };
+
+    const parsed = parseStateMd(download(ref.fileId));
+    const reparsed = parseStateMd(renderStateMd(parsed));
+    const clean = JSON.stringify(reparsed) === JSON.stringify(parsed);
+    return {
+      month,
+      found: true,
+      clean,
+      detail: clean
+        ? `round-trips clean (${parsed.documents.length} docs, ${parsed.processed.length} msgs)`
+        : 'DRIFT: render→parse differs from the source ledger',
+    };
+  } catch (err) {
+    return { month, found: true, clean: false, detail: `shadow read failed: ${(err as Error).message}` };
   }
 }
 

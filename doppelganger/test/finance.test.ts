@@ -11,12 +11,16 @@ import {
   lastFinanceGateSkip,
   maybeEnqueueFinanceRun,
   readFinanceStateFromDrive,
+  shadowValidateMonth,
   type FinanceState,
   type GateDeps,
   type GateLogEntry,
   type NotifyItem,
 } from '../src/adapters/finance.ts';
+import { readFileSync } from 'node:fs';
 import type { GwsResult, GwsRunner } from '../src/adapters/state.ts';
+
+const FIXTURE_MD = readFileSync(path.join(import.meta.dirname, 'fixtures', 'state-2026-06.md'), 'utf8');
 
 const BACKSTOP_MS = 168 * 3_600_000; // mirror the default window
 
@@ -87,6 +91,52 @@ test('readFinanceStateFromDrive: a bad-JSON / failed download → null (never th
     rootFolderId: () => 'ROOT',
   });
   assert.equal(state, null);
+});
+
+// ---- shadowValidateMonth (step 2 read-only wiring) -------------------------------------------------
+
+/** Runner that walks root → month folder → .doppelganger → state.md by inspecting the query clause. */
+function ledgerRunner(over: { month?: GwsResult; dopp?: GwsResult; file?: GwsResult } = {}): GwsRunner {
+  return (args) => {
+    const p = args[args.indexOf('--params') + 1] ?? '';
+    if (p.includes("name='2026-06'")) return over.month ?? gwsOk(JSON.stringify({ files: [{ id: 'MONTH' }] }));
+    if (p.includes('.doppelganger')) return over.dopp ?? gwsOk(JSON.stringify({ files: [{ id: 'DOPP' }] }));
+    if (p.includes('state.md')) return over.file ?? gwsOk(JSON.stringify({ files: [{ id: 'SM', headRevisionId: 'R1' }] }));
+    throw new Error(`unexpected gws call: ${args.join(' ')}`);
+  };
+}
+
+test('shadowValidateMonth: the real ledger round-trips clean (found + clean)', () => {
+  const r = shadowValidateMonth('2026-06', { run: ledgerRunner(), download: () => FIXTURE_MD, rootFolderId: () => 'ROOT' });
+  assert.equal(r.found, true);
+  assert.equal(r.clean, true);
+  assert.match(r.detail, /round-trips clean \(12 docs/);
+});
+
+test('shadowValidateMonth: no month folder → found=false but clean (month not started)', () => {
+  const r = shadowValidateMonth('2026-06', {
+    run: ledgerRunner({ month: gwsOk(JSON.stringify({ files: [] })) }),
+    download: () => FIXTURE_MD,
+    rootFolderId: () => 'ROOT',
+  });
+  assert.equal(r.found, false);
+  assert.equal(r.clean, true);
+});
+
+test('shadowValidateMonth: no drive root id → found=false, flagged not-clean', () => {
+  const r = shadowValidateMonth('2026-06', { run: ledgerRunner(), download: () => FIXTURE_MD, rootFolderId: () => null });
+  assert.equal(r.found, false);
+  assert.equal(r.clean, false);
+});
+
+test('shadowValidateMonth: a gws error during resolution is caught, never throws', () => {
+  const r = shadowValidateMonth('2026-06', {
+    run: () => gwsFail('network down'),
+    download: () => FIXTURE_MD,
+    rootFolderId: () => 'ROOT',
+  });
+  assert.equal(r.found, false); // findChildId swallows the gws error → treated as "not found"
+  assert.equal(r.clean, true);
 });
 
 // ---- lastFinanceGateSkip (healthcheck reads this) --------------------------------------------------
