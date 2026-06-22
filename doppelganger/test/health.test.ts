@@ -6,6 +6,8 @@ import { config } from '../src/config.ts';
 
 const authOk = () => ({ ok: true, detail: '' });
 const authFail = () => ({ ok: false, detail: 'unauthenticated' });
+const noSkip = () => null; // deterministic: no gate-skip on record (don't read the real prod log)
+const skipAt = (ms: number) => () => ({ action: 'skip' as const, reason: 'nothing actionable', ts: new Date(ms).toISOString() });
 
 const OPERATOR = '+46736625308';
 const OP_CONV = 'op-conv';
@@ -49,7 +51,7 @@ test('stale last-success (auth ok) → one outbox row to the operator', () => {
   const staleTs = new Date(Date.now() - (config.staleRunHours + 2) * 3_600_000).toISOString();
   insertSuccess(db, 'R-stale', staleTs);
 
-  withOperator(OPERATOR, () => runHealthcheck(db, authOk));
+  withOperator(OPERATOR, () => runHealthcheck(db, authOk, noSkip));
 
   const outbox = selectPendingOutbox(db);
   assert.equal(outbox.length, 1, 'exactly one alert queued');
@@ -114,7 +116,39 @@ test('only a GROUP message from the operator → not a push target (would leak i
   });
   insertSuccess(db, 'R-grp', new Date(Date.now() - (config.staleRunHours + 2) * 3_600_000).toISOString());
 
-  withOperator(OPERATOR, () => runHealthcheck(db, authOk));
+  withOperator(OPERATOR, () => runHealthcheck(db, authOk, noSkip));
 
   assert.equal(selectPendingOutbox(db).length, 0, 'a group message must never become the push target');
+});
+
+test('stale last-success but a RECENT gate-skip → no alert (the gate skipped; agent is healthily idle)', () => {
+  const db = freshDb();
+  seedOperatorDm(db);
+  insertSuccess(db, 'R-stale', new Date(Date.now() - (config.staleRunHours + 2) * 3_600_000).toISOString());
+
+  withOperator(OPERATOR, () => runHealthcheck(db, authOk, skipAt(Date.now() - 3_600_000)));
+
+  assert.equal(selectPendingOutbox(db).length, 0, 'a deliberate skip within the window is a healthy heartbeat');
+});
+
+test('stale last-success AND an old gate-skip → alert (nothing healthy recently)', () => {
+  const db = freshDb();
+  seedOperatorDm(db);
+  insertSuccess(db, 'R-stale', new Date(Date.now() - (config.staleRunHours + 2) * 3_600_000).toISOString());
+
+  withOperator(OPERATOR, () =>
+    runHealthcheck(db, authOk, skipAt(Date.now() - (config.staleRunHours + 5) * 3_600_000)),
+  );
+
+  assert.equal(selectPendingOutbox(db).length, 1, 'both success and skip are stale → real alert');
+});
+
+test('no success ever but a recent gate-skip → no alert (a skip is a valid baseline)', () => {
+  const db = freshDb();
+  seedOperatorDm(db);
+  // no insertSuccess at all
+
+  withOperator(OPERATOR, () => runHealthcheck(db, authOk, skipAt(Date.now() - 3_600_000)));
+
+  assert.equal(selectPendingOutbox(db).length, 0);
 });

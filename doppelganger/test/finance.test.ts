@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { insertEvent, openDb, selectPendingFifo, type Db } from '../src/db.ts';
@@ -6,23 +8,130 @@ import {
   bucketFor,
   computeFingerprint,
   decideGate,
-  FINANCE_STATE_PATH,
+  lastFinanceGateSkip,
   maybeEnqueueFinanceRun,
+  readFinanceStateFromDrive,
   type FinanceState,
   type GateDeps,
   type GateLogEntry,
   type NotifyItem,
 } from '../src/adapters/finance.ts';
+import type { GwsResult, GwsRunner } from '../src/adapters/state.ts';
 
 const BACKSTOP_MS = 168 * 3_600_000; // mirror the default window
 
-// Regression: the gate must read the entrepreneur's state.json where the worker actually writes it —
-// under agents/<agent>/ (worker cwd), NOT home/entrepreneur/. The original path dropped `agents/`, so
-// the gate read nothing in prod and fired every run (a silent no-op).
-test('FINANCE_STATE_PATH lives under agents/entrepreneur (the worker cwd)', () => {
-  assert.ok(
-    FINANCE_STATE_PATH.endsWith(path.join('agents', 'entrepreneur', 'staging', '.state', 'state.json')),
-    `unexpected state path: ${FINANCE_STATE_PATH}`,
+// ---- readFinanceStateFromDrive (authoritative state.json on the Drive mirror) ----------------------
+
+const gwsOk = (stdout: string): GwsResult => ({ ok: true, stdout, detail: '' });
+const gwsFail = (detail: string): GwsResult => ({ ok: false, stdout: '', detail });
+const DRIVE_STATE_V2 = JSON.stringify({
+  version: 2,
+  periods: { '2026-06': { notify: { fingerprint: 'abc', items: {} } } },
+});
+
+/** A gws runner that resolves the .doppelganger folder then state.json by the `name='...'` clause. */
+function driveRunner(over: { folder?: GwsResult; file?: GwsResult } = {}): GwsRunner {
+  return (args) => {
+    const params = args[args.indexOf('--params') + 1] ?? '';
+    if (params.includes(".doppelganger")) return over.folder ?? gwsOk(JSON.stringify({ files: [{ id: 'DOPP' }] }));
+    if (params.includes('state.json')) return over.file ?? gwsOk(JSON.stringify({ files: [{ id: 'SJ' }] }));
+    throw new Error(`unexpected gws call: ${args.join(' ')}`);
+  };
+}
+
+test('readFinanceStateFromDrive: resolves folder→file→download and parses v2 state', () => {
+  const state = readFinanceStateFromDrive({
+    run: driveRunner(),
+    download: () => DRIVE_STATE_V2,
+    rootFolderId: () => 'ROOT',
+  });
+  assert.equal(state?.version, 2);
+  assert.ok(state?.periods?.['2026-06']);
+});
+
+test('readFinanceStateFromDrive: no root folder id → null (gate fires)', () => {
+  assert.equal(readFinanceStateFromDrive({ run: driveRunner(), download: () => DRIVE_STATE_V2, rootFolderId: () => null }), null);
+});
+
+test('readFinanceStateFromDrive: .doppelganger folder missing → null', () => {
+  const state = readFinanceStateFromDrive({
+    run: driveRunner({ folder: gwsOk(JSON.stringify({ files: [] })) }),
+    download: () => DRIVE_STATE_V2,
+    rootFolderId: () => 'ROOT',
+  });
+  assert.equal(state, null);
+});
+
+test('readFinanceStateFromDrive: state.json missing → null', () => {
+  const state = readFinanceStateFromDrive({
+    run: driveRunner({ file: gwsOk(JSON.stringify({ files: [] })) }),
+    download: () => DRIVE_STATE_V2,
+    rootFolderId: () => 'ROOT',
+  });
+  assert.equal(state, null);
+});
+
+test('readFinanceStateFromDrive: a gws list error → null', () => {
+  const state = readFinanceStateFromDrive({
+    run: () => gwsFail('network down'),
+    download: () => DRIVE_STATE_V2,
+    rootFolderId: () => 'ROOT',
+  });
+  assert.equal(state, null);
+});
+
+test('readFinanceStateFromDrive: a bad-JSON / failed download → null (never throws)', () => {
+  const state = readFinanceStateFromDrive({
+    run: driveRunner(),
+    download: () => { throw new Error('download boom'); },
+    rootFolderId: () => 'ROOT',
+  });
+  assert.equal(state, null);
+});
+
+// ---- lastFinanceGateSkip (healthcheck reads this) --------------------------------------------------
+
+function withGateLog(lines: string[], fn: (logPath: string) => void): void {
+  const dir = mkdtempSync(path.join(tmpdir(), 'dg-gate-'));
+  const logPath = path.join(dir, 'finance-gate.jsonl');
+  try {
+    if (lines.length) writeFileSync(logPath, lines.join('\n') + '\n');
+    fn(logPath);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('lastFinanceGateSkip: returns the newest skip, ignoring later fires', () => {
+  withGateLog(
+    [
+      JSON.stringify({ action: 'skip', reason: 'a', ts: '2026-06-20T08:00:00Z' }),
+      JSON.stringify({ action: 'skip', reason: 'b', ts: '2026-06-21T08:00:00Z' }),
+      JSON.stringify({ action: 'fire', reason: 'c', ts: '2026-06-22T08:00:00Z' }),
+    ],
+    (logPath) => {
+      const e = lastFinanceGateSkip(logPath);
+      assert.equal(e?.ts, '2026-06-21T08:00:00Z'); // newest *skip*, not the later fire
+    },
+  );
+});
+
+test('lastFinanceGateSkip: no skips (only fires) → null', () => {
+  withGateLog([JSON.stringify({ action: 'fire', reason: 'x', ts: '2026-06-22T08:00:00Z' })], (logPath) => {
+    assert.equal(lastFinanceGateSkip(logPath), null);
+  });
+});
+
+test('lastFinanceGateSkip: missing log file → null', () => {
+  assert.equal(lastFinanceGateSkip(path.join(tmpdir(), 'does-not-exist-finance-gate.jsonl')), null);
+});
+
+test('lastFinanceGateSkip: a malformed line is skipped, earlier valid skip still found', () => {
+  withGateLog(
+    ['{ not json', JSON.stringify({ action: 'skip', reason: 'ok', ts: '2026-06-19T08:00:00Z' })],
+    (logPath) => {
+      assert.equal(lastFinanceGateSkip(logPath)?.ts, '2026-06-19T08:00:00Z');
+    },
   );
 });
 

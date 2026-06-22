@@ -3,6 +3,7 @@ import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.ts';
 import { insertQueue, lastEntrepreneurSuccess, type Db } from '../db.ts';
+import { defaultGwsRunner, makeDriveDownloader, type DriveDownloader, type GwsRunner } from './state.ts';
 
 // The finance orchestrator-star (deterministic, no LLM). It decides whether the daily
 // `entrepreneur/run` heartbeat needs to fire at all — the skip-gate from the star-clusters plan,
@@ -16,19 +17,16 @@ import { insertQueue, lastEntrepreneurSuccess, type Db } from '../db.ts';
 export const ENTREPRENEUR_RUN_TASK = 'run';
 
 /**
- * Local mirror of the entrepreneur's run-metadata state. The daemon and the agent share this box.
- * It lives under `agents/<agent>/` because the worker runs each agent with that as its cwd
- * (`worker.ts`: `cwd = agentsDir/<agent>`), and the entrepreneur writes `staging/.state/` relative to
- * there. Must stay in lockstep with the agent's actual write location — a mismatch makes the gate read
- * nothing and fire every time (safe, but a silent no-op).
+ * The entrepreneur's settings file (its Drive root folder id lives here, like the agent reads it).
+ * Under `agents/<agent>/` because that's the worker's cwd for the agent (`worker.ts`).
  */
-export const FINANCE_STATE_PATH = path.join(
+export const ENTREPRENEUR_SETTINGS_PATH = path.join(
   config.agentSettingsDir,
   'entrepreneur',
-  'staging',
-  '.state',
-  'state.json',
+  'settings.json',
 );
+
+const DRIVE_FOLDER_MIME = 'application/vnd.google-apps.folder';
 
 /** Append-only audit trail of gate decisions, so "what did TS skip" is reviewable (review #4). */
 export const FINANCE_GATE_LOG_PATH = path.join(config.home, 'finance-gate.jsonl');
@@ -165,13 +163,82 @@ export function decideGate(
   return { action: 'skip', reason: 'no actionable change in any open period' };
 }
 
-/** Read + parse the local state.json. Any failure → null (the gate reads null as "fire"). */
-export function readFinanceState(statePath: string = FINANCE_STATE_PATH): FinanceState | null {
+/** The entrepreneur's Drive root folder id, from its settings.json. null if unreadable → gate fires. */
+function readDriveRootFolderId(settingsPath: string = ENTREPRENEUR_SETTINGS_PATH): string | null {
   try {
-    return JSON.parse(readFileSync(statePath, 'utf8')) as FinanceState;
+    const s = JSON.parse(readFileSync(settingsPath, 'utf8')) as { driveRootFolderId?: string };
+    return typeof s.driveRootFolderId === 'string' && s.driveRootFolderId ? s.driveRootFolderId : null;
   } catch {
     return null;
   }
+}
+
+/** Resolve a single child id by name (+ optional mimeType) under a Drive folder. null on any miss. */
+function findChildId(parentId: string, name: string, mimeType: string | null, run: GwsRunner): string | null {
+  const clauses = [`name='${name}'`, `'${parentId}' in parents`, 'trashed=false'];
+  if (mimeType) clauses.push(`mimeType='${mimeType}'`);
+  const params = JSON.stringify({ q: clauses.join(' and '), fields: 'files(id)' });
+  const res = run(['drive', 'files', 'list', '--params', params, '--format', 'json']);
+  if (!res.ok) return null;
+  try {
+    return (JSON.parse(res.stdout) as { files?: Array<{ id?: string }> }).files?.[0]?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export interface DriveStateDeps {
+  run?: GwsRunner;
+  download?: DriveDownloader;
+  rootFolderId?: () => string | null;
+}
+
+/**
+ * Read the entrepreneur's AUTHORITATIVE run-metadata state.json from the Drive mirror
+ * (`<DRIVE_ROOT>/.doppelganger/state.json`). The local cache the agent keeps is not reliably current —
+ * the agent treats Drive as the source of truth — so the gate must read Drive to decide correctly.
+ * EVERY failure (no root id, folder/file not found, gws error, bad JSON, download throw) returns null,
+ * which the gate reads as "can't prove the set → fire". Conservative by construction.
+ */
+export function readFinanceStateFromDrive(deps: DriveStateDeps = {}): FinanceState | null {
+  const run = deps.run ?? defaultGwsRunner;
+  const download = deps.download ?? makeDriveDownloader(run);
+  const rootId = (deps.rootFolderId ?? readDriveRootFolderId)();
+  if (!rootId) return null;
+  const folderId = findChildId(rootId, '.doppelganger', DRIVE_FOLDER_MIME, run);
+  if (!folderId) return null;
+  const fileId = findChildId(folderId, 'state.json', null, run);
+  if (!fileId) return null;
+  try {
+    return JSON.parse(download(fileId)) as FinanceState;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The last gate decision that was a `skip`, from the audit log — newest first. The healthcheck treats
+ * a recent deliberate skip (nothing actionable) as a healthy heartbeat, not a stalled agent.
+ */
+export function lastFinanceGateSkip(logPath: string = FINANCE_GATE_LOG_PATH): GateLogEntry | null {
+  let content: string;
+  try {
+    content = readFileSync(logPath, 'utf8');
+  } catch {
+    return null;
+  }
+  const lines = content.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    try {
+      const entry = JSON.parse(line) as GateLogEntry;
+      if (entry.action === 'skip') return entry;
+    } catch {
+      // ignore a malformed line and keep scanning back
+    }
+  }
+  return null;
 }
 
 /** Append one decision to the audit log. Best-effort — a logging failure never blocks the gate. */
@@ -199,7 +266,7 @@ export interface GateDeps {
 }
 
 const defaultDeps: GateDeps = {
-  readState: () => readFinanceState(),
+  readState: () => readFinanceStateFromDrive(),
   now: () => new Date(),
   log: (entry) => logGateDecision(entry),
 };
