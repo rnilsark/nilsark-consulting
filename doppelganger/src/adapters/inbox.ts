@@ -77,12 +77,16 @@ interface GmailGetResponse {
  * inside `entrepreneur:intake`, one message per run, so each document gets an isolated context.
  * Returns messages newer than `cursor` (strict `internalDate >`).
  */
-export const defaultGmailList: GmailList = (allowlist, cursor) => {
-  const q = buildQuery(allowlist);
-  const listParams = JSON.stringify({ userId: 'me', q, maxResults: 50 });
+/**
+ * Shared list+fetch: run the `q`, then `get` each message `full` and parse it to an InboxMessage.
+ * Both the cursor poll (defaultGmailList) and the daily sweep (defaultGmailSweep) build on this — the
+ * only difference between them is the query and how they decide which results count as "new".
+ */
+function fetchMessages(q: string, maxResults: number, tag: string): InboxMessage[] {
+  const listParams = JSON.stringify({ userId: 'me', q, maxResults });
   const list = runGws(['gmail', 'users', 'messages', 'list', '--params', listParams, '--format', 'json']);
   if (!list.ok) {
-    console.error(`[inbox-ingest] gmail list failed: ${list.detail}`);
+    console.error(`[${tag}] gmail list failed: ${list.detail}`);
     return [];
   }
   let ids: string[];
@@ -90,31 +94,53 @@ export const defaultGmailList: GmailList = (allowlist, cursor) => {
     const parsed = JSON.parse(list.stdout) as { messages?: Array<{ id?: string }> };
     ids = (parsed.messages ?? []).map((m) => m.id).filter((id): id is string => typeof id === 'string');
   } catch {
-    console.error('[inbox-ingest] gmail list returned non-JSON');
+    console.error(`[${tag}] gmail list returned non-JSON`);
     return [];
   }
-
-  const since = cursor ? Number(cursor) : 0;
   const out: InboxMessage[] = [];
   for (const id of ids) {
     const getParams = JSON.stringify({ userId: 'me', id, format: 'full' });
     const got = runGws(['gmail', 'users', 'messages', 'get', '--params', getParams, '--format', 'json']);
     if (!got.ok) {
-      console.error(`[inbox-ingest] gmail get ${id} failed: ${got.detail}`);
+      console.error(`[${tag}] gmail get ${id} failed: ${got.detail}`);
       continue;
     }
-    let msg: GmailGetResponse;
     try {
-      msg = JSON.parse(got.stdout) as GmailGetResponse;
+      out.push(parseGmailMessage(id, JSON.parse(got.stdout) as GmailGetResponse));
     } catch {
-      console.error(`[inbox-ingest] gmail get ${id} returned non-JSON`);
-      continue;
+      console.error(`[${tag}] gmail get ${id} returned non-JSON`);
     }
-    if (Number(msg.internalDate ?? '') <= since) continue; // already past the cursor → not new
-    out.push(parseGmailMessage(id, msg));
   }
   return out;
+}
+
+export const defaultGmailList: GmailList = (allowlist, cursor) => {
+  const since = cursor ? Number(cursor) : 0;
+  return fetchMessages(buildQuery(allowlist), 50, 'inbox-ingest')
+    .filter((m) => Number(m.internalDate) > since); // strictly newer than the cursor → not yet seen
 };
+
+// ---- daily catch-all sweep (step 3: the mailbox work the entrepreneur's run does today, in TS) -----
+
+/** The daily-sweep query: every attachment-bearing inbox mail since the month's first day. */
+export function buildSweepQuery(firstDay: string): string {
+  return `has:attachment in:inbox after:${firstDay}`;
+}
+
+/** Lists attachment-bearing inbox messages since `firstDay` (Gmail `after:` form). Injectable for tests. */
+export type GmailSweep = (firstDay: string) => InboxMessage[];
+
+export const defaultGmailSweep: GmailSweep = (firstDay) => fetchMessages(buildSweepQuery(firstDay), 100, 'intake-sweep');
+
+/**
+ * The new-message set for the daily sweep: listed messages whose id is not already handled. The
+ * handled set is the union of `Processed Gmail` ids that are `classified`/`skipped — …` across the
+ * open periods (the same dedup key the agent uses) — so a doc already booked is never re-fetched.
+ */
+export function selectNewMessages(messages: InboxMessage[], handledIds: Iterable<string>): InboxMessage[] {
+  const handled = new Set(handledIds);
+  return messages.filter((m) => !handled.has(m.messageId));
+}
 
 function header(headers: GmailHeader[] | undefined, name: string): string {
   const h = (headers ?? []).find((x) => (x.name ?? '').toLowerCase() === name.toLowerCase());

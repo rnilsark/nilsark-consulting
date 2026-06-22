@@ -3,9 +3,11 @@ import { test } from 'node:test';
 import { getChannelCursor, openDb, selectPendingFifo, setChannelCursor } from '../src/db.ts';
 import {
   buildQuery,
+  buildSweepQuery,
   ingestInbox,
   INBOX_CURSOR_KEY,
   parseGmailMessage,
+  selectNewMessages,
   type GmailList,
   type InboxMessage,
 } from '../src/adapters/inbox.ts';
@@ -160,4 +162,26 @@ test('parseGmailMessage: pulls headers + attachment parts, skips multipart wrapp
     { filename: 'faktura.pdf', mimeType: 'application/pdf' },
     { filename: 'logo.png', mimeType: 'image/png' },
   ]);
+});
+
+// ---- daily sweep helpers (step 3) ------------------------------------------
+
+test('buildSweepQuery: attachment-bearing inbox mail since the first of the month', () => {
+  assert.equal(buildSweepQuery('2026/06/01'), 'has:attachment in:inbox after:2026/06/01');
+});
+
+test('selectNewMessages: drops ids already handled, keeps the rest', () => {
+  const listed = [msg('a', '1'), msg('b', '2'), msg('c', '3')];
+  const out = selectNewMessages(listed, ['b']);
+  assert.deepEqual(out.map((m) => m.messageId), ['a', 'c']);
+});
+
+test('selectNewMessages: everything handled → empty (the common quiet-day case)', () => {
+  const listed = [msg('a', '1'), msg('b', '2')];
+  assert.equal(selectNewMessages(listed, ['a', 'b']).length, 0);
+});
+
+test('selectNewMessages: empty handled set → all are new', () => {
+  const listed = [msg('a', '1'), msg('b', '2')];
+  assert.equal(selectNewMessages(listed, []).length, 2);
 });
