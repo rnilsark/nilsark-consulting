@@ -15,9 +15,15 @@ import { insertQueue, lastEntrepreneurSuccess, type Db } from '../db.ts';
 /** The entrepreneur's heartbeat task — the plain string the schedule enqueues. */
 export const ENTREPRENEUR_RUN_TASK = 'run';
 
-/** Local mirror of the entrepreneur's run-metadata state. The daemon and the agent share this box. */
+/**
+ * Local mirror of the entrepreneur's run-metadata state. The daemon and the agent share this box.
+ * It lives under `agents/<agent>/` because the worker runs each agent with that as its cwd
+ * (`worker.ts`: `cwd = agentsDir/<agent>`), and the entrepreneur writes `staging/.state/` relative to
+ * there. Must stay in lockstep with the agent's actual write location — a mismatch makes the gate read
+ * nothing and fire every time (safe, but a silent no-op).
+ */
 export const FINANCE_STATE_PATH = path.join(
-  config.home,
+  config.agentSettingsDir,
   'entrepreneur',
   'staging',
   '.state',

@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import { test } from 'node:test';
 import { insertEvent, openDb, selectPendingFifo, type Db } from '../src/db.ts';
 import {
   bucketFor,
   computeFingerprint,
   decideGate,
+  FINANCE_STATE_PATH,
   maybeEnqueueFinanceRun,
   type FinanceState,
   type GateDeps,
@@ -13,6 +15,16 @@ import {
 } from '../src/adapters/finance.ts';
 
 const BACKSTOP_MS = 168 * 3_600_000; // mirror the default window
+
+// Regression: the gate must read the entrepreneur's state.json where the worker actually writes it —
+// under agents/<agent>/ (worker cwd), NOT home/entrepreneur/. The original path dropped `agents/`, so
+// the gate read nothing in prod and fired every run (a silent no-op).
+test('FINANCE_STATE_PATH lives under agents/entrepreneur (the worker cwd)', () => {
+  assert.ok(
+    FINANCE_STATE_PATH.endsWith(path.join('agents', 'entrepreneur', 'staging', '.state', 'state.json')),
+    `unexpected state path: ${FINANCE_STATE_PATH}`,
+  );
+});
 
 function freshDb(): Db {
   return openDb(':memory:');

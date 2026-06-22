@@ -44,8 +44,8 @@ A needed Setting missing → write `out.json` `status:"error"`; never guess an a
 
 You own your finance state under Drive `<DRIVE_ROOT>/.doppelganger/` — **separate from the legacy CFO
 plugin's `.nilsark/`**, so the two never touch. Both this file's inline steps and your skills follow
-the schema and I/O cycle below. Local staging is `$DOPPELGANGER_HOME/entrepreneur/staging`
-(`STAGING_DIR`).
+the schema and I/O cycle below. Local staging is `$DOPPELGANGER_HOME/agents/entrepreneur/staging`
+(`STAGING_DIR`) — under `agents/<agent>/`, which is your working directory.
 
 **Locations:** monthly `state.md` at `<DRIVE_ROOT>/YYYY-MM/.doppelganger/state.md`; run metadata
 `state.json` local at `$STAGING_DIR/.state/state.json` + Drive mirror `<DRIVE_ROOT>/.doppelganger/state.json`.
