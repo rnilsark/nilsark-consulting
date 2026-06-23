@@ -52,22 +52,46 @@ function hash01(s) {
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
-/** CORE at center; agents on an ellipse with a deterministic per-name jitter. */
+// Domain clusters: each agent orbits its domain's sector, so the constellation reads as sub-systems
+// (a finance sub-constellation, a calendar one, the intake door) rather than one undifferentiated
+// ring. The finance list already names the agents the entrepreneur is being split into — they slot
+// into the finance cluster automatically as they get registered + dispatched.
+const CLUSTERS = [
+  { name: 'finance', base: -55, members: ['entrepreneur', 'inbox', 'classifier', 'reconciler', 'summarizer'] },
+  { name: 'calendar', base: 70, members: ['planner'] },
+  { name: 'intake', base: 180, members: ['triage', 'chat'] },
+];
+const OTHER_BASE = 250;
+function domainOf(name) {
+  const c = CLUSTERS.find((c) => c.members.includes(name));
+  return c ? c.name : 'other';
+}
+
+/** CORE at center; agents fanned within their domain's angular sector (deterministic per-name jitter). */
 function layout(names) {
   const pos = { [CORE]: { x: 50, y: 53 } };
-  const sorted = [...names].sort();
-  const n = sorted.length;
-  sorted.forEach((name, i) => {
-    const j1 = hash01(name);
-    const j2 = hash01(name + '#');
-    const angle = ((-90 + (i * 360) / n + (j1 - 0.5) * 24) * Math.PI) / 180;
-    const rx = 27 + (j2 - 0.5) * 10;
-    const ry = 25 + (j2 - 0.5) * 8;
-    pos[name] = {
-      x: clamp(50 + Math.cos(angle) * rx, 12, 88),
-      y: clamp(51 + Math.sin(angle) * ry, 16, 80),
-    };
-  });
+  const groups = new Map();
+  for (const name of names) {
+    const d = domainOf(name);
+    if (!groups.has(d)) groups.set(d, []);
+    groups.get(d).push(name);
+  }
+  for (const [domain, members] of groups) {
+    members.sort();
+    const base = CLUSTERS.find((c) => c.name === domain)?.base ?? OTHER_BASE;
+    const spread = Math.min(70, 16 + members.length * 12); // wider arc as a cluster grows
+    members.forEach((name, i) => {
+      const frac = members.length === 1 ? 0.5 : i / (members.length - 1);
+      const angle = ((base + (frac - 0.5) * spread + (hash01(name) - 0.5) * 8) * Math.PI) / 180;
+      const j = hash01(name + '#');
+      const rx = 30 + (j - 0.5) * 8;
+      const ry = 27 + (j - 0.5) * 6;
+      pos[name] = {
+        x: clamp(50 + Math.cos(angle) * rx, 12, 88),
+        y: clamp(51 + Math.sin(angle) * ry, 16, 80),
+      };
+    });
+  }
   return pos;
 }
 
