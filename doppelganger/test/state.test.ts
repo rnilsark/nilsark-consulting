@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import {
@@ -320,10 +320,7 @@ test('readMonthState: default downloader is driven by the injected run (command 
   // go through the same scripted runner. The fake writes the fixture to the `-o` destination.
   const run: GwsRunner = (args) => {
     if (args[2] === 'list') return ok(JSON.stringify({ files: [{ id: 'F1', headRevisionId: 'R1' }] }));
-    if (args.includes('-o')) {
-      writeFileSync(args[args.indexOf('-o') + 1], FIXTURE);
-      return ok('');
-    }
+    if (args[2] === 'get') return ok(FIXTURE); // `files get --alt media` streams content to stdout
     throw new Error(`unexpected: ${args.join(' ')}`);
   };
   const res = readMonthState('2026-06', 'FOLDER', { run });
@@ -401,7 +398,7 @@ test('readMonthState: a download gws failure (via the real downloader) propagate
   // Only `run` injected → exercises makeDriveDownloader's own res.ok===false throw branch.
   const run: GwsRunner = (args) => {
     if (args[2] === 'list') return ok(JSON.stringify({ files: [{ id: 'F1', headRevisionId: 'R1' }] }));
-    if (args.includes('-o')) return fail('media 404');
+    if (args[2] === 'get') return fail('media 404');
     throw new Error(`unexpected: ${args.join(' ')}`);
   };
   assert.throws(() => readMonthState('2026-06', 'FOLDER', { run }), /download F1 failed: media 404/);

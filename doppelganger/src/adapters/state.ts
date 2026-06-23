@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -282,11 +282,16 @@ export interface GwsResult {
   detail: string;
 }
 
-/** Runs a `gws` subcommand and returns its stdout (or a failure detail). Injectable for tests. */
-export type GwsRunner = (args: string[]) => GwsResult;
+/**
+ * Runs a `gws` subcommand and returns its stdout (or a failure detail). Injectable for tests.
+ * `opts.cwd` matters for file I/O: `gws files get -o NAME` and `gws +upload NAME` only accept paths
+ * INSIDE the current working directory (gws rejects an absolute/outside path), so the file callers run
+ * with `cwd` set to a temp dir and pass a bare relative filename.
+ */
+export type GwsRunner = (args: string[], opts?: { cwd?: string }) => GwsResult;
 
-export const defaultGwsRunner: GwsRunner = (args) => {
-  const res = spawnSync('gws', args, { encoding: 'utf8', timeout: 30_000, maxBuffer: 16 * 1024 * 1024 });
+export const defaultGwsRunner: GwsRunner = (args, opts) => {
+  const res = spawnSync('gws', args, { encoding: 'utf8', timeout: 30_000, maxBuffer: 16 * 1024 * 1024, cwd: opts?.cwd });
   if (res.error) return { ok: false, stdout: '', detail: res.error.message };
   if (res.status !== 0) {
     const output = ((res.stdout ?? '') + (res.stderr ?? '')).trim();
@@ -327,18 +332,17 @@ export function resolveStateFile(folderId: string, run: GwsRunner = defaultGwsRu
 /** The bytes-download seam — fetch a Drive file's content as text. Injectable for tests. */
 export type DriveDownloader = (fileId: string) => string;
 
-/** Build a downloader over a given gws runner — so the download command is driven by the same seam. */
+/**
+ * Build a downloader over a given gws runner. When stdout is piped (how the daemon runs gws), `gws
+ * files get --alt media` streams the file CONTENT to stdout — no `-o`, no temp file, no cwd games
+ * (an earlier `-o` version silently failed: gws rejects out-of-cwd paths and otherwise streams anyway,
+ * which made the gate read null and fire every day).
+ */
 export function makeDriveDownloader(run: GwsRunner): DriveDownloader {
   return (fileId) => {
-    const dir = mkdtempSync(path.join(tmpdir(), 'dg-state-'));
-    const dest = path.join(dir, 'state.md');
-    try {
-      const res = run(['drive', 'files', 'get', '--params', JSON.stringify({ fileId, alt: 'media' }), '-o', dest]);
-      if (!res.ok) throw new Error(`[state] download ${fileId} failed: ${res.detail}`);
-      return readFileSync(dest, 'utf8');
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    const res = run(['drive', 'files', 'get', '--params', JSON.stringify({ fileId, alt: 'media' })]);
+    if (!res.ok) throw new Error(`[state] download ${fileId} failed: ${res.detail}`);
+    return res.stdout;
   };
 }
 
@@ -396,14 +400,15 @@ export function writeMonthState(
   };
 
   const dir = mkdtempSync(path.join(tmpdir(), 'dg-state-'));
-  const local = path.join(dir, 'state.md');
+  // gws uploads only accept a path inside cwd, so write a bare-named file in `dir` and run gws there.
+  const name = 'state.md';
   try {
-    writeFileSync(local, renderStateMd(state));
+    writeFileSync(path.join(dir, name), renderStateMd(state));
 
     if (ref === null) {
       const res = run([
-        'drive', '+upload', local, '--parent', folderId, '--name', 'state.md', '--format', 'json',
-      ]);
+        'drive', '+upload', name, '--parent', folderId, '--name', 'state.md', '--format', 'json',
+      ], { cwd: dir });
       return res.ok ? { ok: true, created: true } : onFailure(res.detail);
     }
 
@@ -428,8 +433,8 @@ export function writeMonthState(
     // is what actually keeps this safe in practice.
     const res = run([
       'drive', 'files', 'update', '--params', JSON.stringify({ fileId: ref.fileId }),
-      '--upload', local, '--upload-content-type', 'text/markdown',
-    ]);
+      '--upload', name, '--upload-content-type', 'text/markdown',
+    ], { cwd: dir });
     return res.ok ? { ok: true, created: false } : onFailure(res.detail);
   } finally {
     rmSync(dir, { recursive: true, force: true });
