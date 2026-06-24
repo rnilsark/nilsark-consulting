@@ -22,6 +22,8 @@ export interface Outcome {
   summary: string;
   orders: Order[];
   replies?: Reply[];
+  /** Structured judgment an orchestrator reads from the run's out.json (e.g. classifier fields). */
+  result?: unknown;
   cost: number | null;
 }
 
@@ -67,7 +69,8 @@ export function buildPrompt(row: QueueRow, outPath: string, registry: Registry, 
     `  "status": "success" | "flagged" | "error",`,
     `  "summary": "your own words about what you did",`,
     `  "orders": [ { "agent": "...", "task": "..." } ],`,
-    `  "replies": [ { "conversationId": "...", "text": "..." } ]`,
+    `  "replies": [ { "conversationId": "...", "text": "..." } ],`,
+    `  "result": <any JSON> // optional: structured output for whoever dispatched you`,
     `}`,
     `"orders" is optional and puts new work on the queue. Agents you may order: ${
       callable.length > 0 ? callable.join(', ') : '(none)'
@@ -201,7 +204,7 @@ export function readOutcome(outPath: string, cost: number | null, failure: strin
   const replies = (Array.isArray(out.replies) ? out.replies : []).filter(
     (r): r is Reply => typeof r?.conversationId === 'string' && typeof r?.text === 'string',
   );
-  return { status: out.status, summary: out.summary, orders, replies, cost };
+  return { status: out.status, summary: out.summary, orders, replies, result: out.result, cost };
 }
 
 /**

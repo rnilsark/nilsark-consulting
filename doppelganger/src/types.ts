@@ -92,4 +92,6 @@ export interface OutFile {
   summary: string;
   orders?: Order[];
   replies?: Reply[];
+  /** Optional structured judgment a dispatching orchestrator consumes (e.g. a classifier's fields). */
+  result?: unknown;
 }

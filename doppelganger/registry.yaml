@@ -53,3 +53,12 @@ agents:
     tools: "Bash(gws gmail users:*),Bash(gws gmail +send --draft:*),Bash(gws drive files get:*),Bash(gws drive files list:*),Bash(gws drive files update:*),Bash(gws drive +upload:*),Bash(date:*),Bash(jq:*),Bash(basenc:*),Bash(mkdir:*),Bash(mv:*),Bash(cd:*),Read,Write,Edit,Skill"
     model: sonnet
     max_concurrency: 1
+
+  # First split-out judgment kernel of the finance domain (the entrepreneur decomposition). Stateless:
+  # given ONE already-downloaded document, classify it + extract its fields and return them as the
+  # out.json `result`. No Drive, no Gmail, no state — pure judgment, so it's cheap, isolated, and
+  # independently testable. The finance orchestrator dispatches it per document and does the filing.
+  classifier:
+    can_be_called_by: [entrepreneur]   # the finance orchestrator hands it one document at a time
+    tools: "Read,Write,Skill"          # Read the file, Skill for the invoice tools, Write the out.json
+    model: sonnet

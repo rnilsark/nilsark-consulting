@@ -267,6 +267,30 @@ test('readOutcome: parses replies and ignores malformed ones', () => {
   assert.equal(outcome.replies?.[0].conversationId, 'C1');
 });
 
+test('readOutcome: passes through a structured result (judgment-agent contract)', () => {
+  const outPath = path.join(tmpdir(), `dg-test-result-${process.pid}.json`);
+  writeFileSync(
+    outPath,
+    JSON.stringify({
+      status: 'success',
+      summary: 'Classified faktura.pdf as leverantörsfaktura.',
+      result: { type: 'leverantörsfaktura', supplier: 'Avanza Pension', amount: '15352.00' },
+    }),
+  );
+  const outcome = readOutcome(outPath, 0.01, null);
+  rmSync(outPath, { force: true });
+  assert.equal(outcome.status, 'success');
+  assert.deepEqual(outcome.result, { type: 'leverantörsfaktura', supplier: 'Avanza Pension', amount: '15352.00' });
+});
+
+test('readOutcome: result is absent (undefined) when the agent omits it', () => {
+  const outPath = path.join(tmpdir(), `dg-test-noresult-${process.pid}.json`);
+  writeFileSync(outPath, JSON.stringify({ status: 'success', summary: 'ok' }));
+  const outcome = readOutcome(outPath, 0.01, null);
+  rmSync(outPath, { force: true });
+  assert.equal(outcome.result, undefined);
+});
+
 test('buildPrompt: injects conversation memory for the chat agent', () => {
   const db = freshDb();
   insertChatMessage(db, { channel: 'stub', conversation_id: 'C1', sender: 'mom', direction: 'in', text: 'är vi lediga?' });
