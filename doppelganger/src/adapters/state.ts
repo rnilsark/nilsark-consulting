@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -333,16 +333,23 @@ export function resolveStateFile(folderId: string, run: GwsRunner = defaultGwsRu
 export type DriveDownloader = (fileId: string) => string;
 
 /**
- * Build a downloader over a given gws runner. When stdout is piped (how the daemon runs gws), `gws
- * files get --alt media` streams the file CONTENT to stdout — no `-o`, no temp file, no cwd games
- * (an earlier `-o` version silently failed: gws rejects out-of-cwd paths and otherwise streams anyway,
- * which made the gate read null and fire every day).
+ * Build a downloader over a given gws runner. gws `files get --alt media` is MIME-dependent: for JSON
+ * it streams the content to stdout (no file); for markdown/binary it writes the content to the `-o`
+ * file and returns only a `{bytes,saved_file}` wrapper on stdout. So we run with `-o` into a temp dir
+ * (cwd-relative — gws rejects out-of-cwd paths) and read the file if one was written, else fall back
+ * to stdout. Handles both state.json (gate) and state.md (ledger). Verified against both on prod.
  */
 export function makeDriveDownloader(run: GwsRunner): DriveDownloader {
   return (fileId) => {
-    const res = run(['drive', 'files', 'get', '--params', JSON.stringify({ fileId, alt: 'media' })]);
-    if (!res.ok) throw new Error(`[state] download ${fileId} failed: ${res.detail}`);
-    return res.stdout;
+    const dir = mkdtempSync(path.join(tmpdir(), 'dg-state-'));
+    const dest = path.join(dir, 'download');
+    try {
+      const res = run(['drive', 'files', 'get', '--params', JSON.stringify({ fileId, alt: 'media' }), '-o', 'download'], { cwd: dir });
+      if (!res.ok) throw new Error(`[state] download ${fileId} failed: ${res.detail}`);
+      return existsSync(dest) ? readFileSync(dest, 'utf8') : res.stdout;
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   };
 }
 

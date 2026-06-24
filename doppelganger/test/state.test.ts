@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import {
   computeSummary,
   emptyMonthState,
   isAuthFailure,
+  makeDriveDownloader,
   parseStateMd,
   readMonthState,
   renderStateMd,
@@ -392,6 +393,17 @@ test('readMonthState: a header-on-its-own-line truncation is still rejected as c
     () => readMonthState('2026-06', 'FOLDER', { run, download: () => '# State:\n## Documents\n' }),
     /corrupt\/partial/,
   );
+});
+
+test('makeDriveDownloader: reads the -o file when gws writes content there (markdown case)', () => {
+  // gws for markdown returns a {bytes,saved_file} wrapper on stdout and writes content to the -o file.
+  const run: GwsRunner = (args, opts) => {
+    assert.ok(opts?.cwd, 'download must run with a cwd');
+    const name = args[args.indexOf('-o') + 1];
+    writeFileSync(path.join(opts.cwd, name), FIXTURE);
+    return ok(JSON.stringify({ bytes: 5257, saved_file: name })); // wrapper, NOT the content
+  };
+  assert.equal(parseStateMd(makeDriveDownloader(run)('F1')).documents.length, 12);
 });
 
 test('readMonthState: a download gws failure (via the real downloader) propagates', () => {
