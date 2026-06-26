@@ -32,10 +32,11 @@ export function now(): string {
 export function insertQueue(
   db: Db,
   row: { agent: string; task: string; parent: string | null },
-): void {
-  db.prepare(
-    `INSERT INTO queue (agent, task, status, parent, created_at) VALUES (?, ?, 'pending', ?, ?)`,
-  ).run(row.agent, row.task, row.parent, now());
+): number {
+  const info = db
+    .prepare(`INSERT INTO queue (agent, task, status, parent, created_at) VALUES (?, ?, 'pending', ?, ?)`)
+    .run(row.agent, row.task, row.parent, now());
+  return Number(info.lastInsertRowid);
 }
 
 export function getQueueRow(db: Db, id: number): QueueRow | undefined {
