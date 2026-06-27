@@ -186,3 +186,51 @@ export function fileDocument(
   if (!w.ok) return { ok: false, detail: `state write ${w.reason}` };
   return { ok: true, driveFileId: up.fileId, detail: `filed ${document.file} → ${typeFolderName}/` };
 }
+
+// ---- the orchestrator entry point -------------------------------------------
+
+export interface IntakeDoc {
+  filePath: string;
+  filename: string;
+  messageId: string;
+  from: string;
+  date: string;
+  subject: string;
+}
+
+export interface RunIntakeResult {
+  status: 'filed' | 'classify-failed' | 'file-failed';
+  detail: string;
+  driveFileId?: string;
+  runId?: string;
+}
+
+/**
+ * The finance orchestrator's full intake of one document: classify (judgment agent) → normalize +
+ * assemble the row (TS) → upload + merge into state.md (TS). This is what the inbox path will call in
+ * place of a whole entrepreneur LLM run. A flagged classification still files the doc but marks the
+ * Processed-Gmail row `error` (so a future sweep revisits it). Never throws on a Drive miss.
+ */
+export async function runIntake(
+  db: Db,
+  month: string,
+  doc: IntakeDoc,
+  deps: { dispatch?: DispatchOptions; filing?: FilingDeps } = {},
+): Promise<RunIntakeResult> {
+  const ir = await intakeDocument(db, month, { filePath: doc.filePath, filename: doc.filename }, deps.dispatch);
+  if (ir.status === 'failed' || !ir.document) {
+    return { status: 'classify-failed', detail: ir.detail, runId: ir.runId };
+  }
+  const processed: ProcessedMessage = {
+    messageId: doc.messageId,
+    date: doc.date,
+    from: doc.from,
+    subject: doc.subject,
+    attachmentFilename: doc.filename,
+    status: ir.status === 'flagged' ? 'error' : 'classified',
+  };
+  const fr = fileDocument(month, doc.filePath, processed, ir.document, deps.filing);
+  return fr.ok
+    ? { status: 'filed', detail: fr.detail, driveFileId: fr.driveFileId, runId: ir.runId }
+    : { status: 'file-failed', detail: fr.detail, runId: ir.runId };
+}
