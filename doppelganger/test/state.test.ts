@@ -7,6 +7,7 @@ import {
   emptyMonthState,
   isAuthFailure,
   makeDriveDownloader,
+  mergeDocument,
   parseStateMd,
   readMonthState,
   renderStateMd,
@@ -179,6 +180,33 @@ test('writeMonthState: upload failure surfaces as an error outcome', () => {
   const { run } = scriptedRunner(steps);
   const out = writeMonthState(emptyMonthState('2026-06'), 'FOLDER', { fileId: 'F1', headRev: 'R1' }, run);
   assert.deepEqual(out, { ok: false, reason: 'error', detail: 'quota exceeded' });
+});
+
+// ---- mergeDocument ----------------------------------------------------------
+
+const sampleDoc = (file: string, type = 'kvitto'): MonthState['documents'][number] => ({
+  file, type, supplier: 'ACME', amount: '100.00', currency: 'SEK', dueDate: '', documentDate: '2026-06-10',
+  ocrNumber: '', bankAccount: '', vatAmount: '20.00', drivePath: `2026-06/Verifikationer/`, driveFileId: 'D1',
+  paymentStatus: 'n/a', fortnoxSent: 'no',
+});
+const sampleProc = (messageId: string, file: string): MonthState['processed'][number] => ({
+  messageId, date: '2026-06-10', from: 'a@b.c', subject: 'Kvitto', attachmentFilename: file, status: 'classified',
+});
+
+test('mergeDocument: adds a new document + processed row, leaving the input unmutated', () => {
+  const base = emptyMonthState('2026-06');
+  const out = mergeDocument(base, sampleProc('m1', 'a.pdf'), sampleDoc('a.pdf'));
+  assert.equal(out.documents.length, 1);
+  assert.equal(out.processed.length, 1);
+  assert.equal(base.documents.length, 0, 'input not mutated');
+});
+
+test('mergeDocument: re-merging the same document is idempotent (no duplicates)', () => {
+  let s = mergeDocument(emptyMonthState('2026-06'), sampleProc('m1', 'a.pdf'), sampleDoc('a.pdf'));
+  s = mergeDocument(s, sampleProc('m1', 'a.pdf'), sampleDoc('a.pdf', 'leverantörsfaktura')); // same file → replace
+  assert.equal(s.documents.length, 1);
+  assert.equal(s.processed.length, 1);
+  assert.equal(s.documents[0].type, 'leverantörsfaktura', 'the row is replaced, not duplicated');
 });
 
 // ---- render shape (byte-level canonical form) -------------------------------

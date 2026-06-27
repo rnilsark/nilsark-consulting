@@ -79,6 +79,25 @@ export function emptyMonthState(month: string): MonthState {
 }
 
 /**
+ * Merge one freshly-classified document into the ledger, idempotently: the document row is added (or
+ * replaced, keyed by `file`) and the Processed-Gmail row is added (or replaced, keyed by
+ * `messageId`+`attachmentFilename` — the same dedup key the agent uses). Returns a NEW MonthState;
+ * the input is not mutated. Re-running with the same inputs is a no-op, so an at-least-once intake is
+ * safe.
+ */
+export function mergeDocument(
+  state: MonthState,
+  processed: ProcessedMessage,
+  document: LedgerDocument,
+): MonthState {
+  const documents = state.documents.filter((d) => d.file !== document.file).concat(document);
+  const sameRow = (p: ProcessedMessage) =>
+    p.messageId === processed.messageId && p.attachmentFilename === processed.attachmentFilename;
+  const procRows = state.processed.filter((p) => !sameRow(p)).concat(processed);
+  return { ...state, documents, processed: procRows };
+}
+
+/**
  * A `gws` failure whose detail names a credential problem. Auth failures must STOP the caller — never
  * be treated as a transient/retryable error — the same rule the agent's CLAUDE.md auth guard enforces.
  * Read paths already throw on any failure; the write path uses this to throw on auth specifically

@@ -34,7 +34,7 @@ export const ENTREPRENEUR_SETTINGS_PATH = path.join(
   'settings.json',
 );
 
-const DRIVE_FOLDER_MIME = 'application/vnd.google-apps.folder';
+export const DRIVE_FOLDER_MIME = 'application/vnd.google-apps.folder';
 
 /** Append-only audit trail of gate decisions, so "what did TS skip" is reviewable (review #4). */
 export const FINANCE_GATE_LOG_PATH = path.join(config.home, 'finance-gate.jsonl');
@@ -172,7 +172,7 @@ export function decideGate(
 }
 
 /** The entrepreneur's Drive root folder id, from its settings.json. null if unreadable → gate fires. */
-function readDriveRootFolderId(settingsPath: string = ENTREPRENEUR_SETTINGS_PATH): string | null {
+export function readDriveRootFolderId(settingsPath: string = ENTREPRENEUR_SETTINGS_PATH): string | null {
   try {
     const s = JSON.parse(readFileSync(settingsPath, 'utf8')) as { driveRootFolderId?: string };
     return typeof s.driveRootFolderId === 'string' && s.driveRootFolderId ? s.driveRootFolderId : null;
@@ -182,7 +182,7 @@ function readDriveRootFolderId(settingsPath: string = ENTREPRENEUR_SETTINGS_PATH
 }
 
 /** Resolve a single child id by name (+ optional mimeType) under a Drive folder. null on any miss. */
-function findChildId(parentId: string, name: string, mimeType: string | null, run: GwsRunner): string | null {
+export function findChildId(parentId: string, name: string, mimeType: string | null, run: GwsRunner): string | null {
   const clauses = [`name='${name}'`, `'${parentId}' in parents`, 'trashed=false'];
   if (mimeType) clauses.push(`mimeType='${mimeType}'`);
   const params = JSON.stringify({ q: clauses.join(' and '), fields: 'files(id)' });

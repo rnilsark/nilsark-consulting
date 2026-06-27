@@ -1,6 +1,20 @@
+import path from 'node:path';
 import { dispatchAndAwait, type DispatchOptions } from '../orchestrate.ts';
 import type { Db } from '../db.ts';
-import type { LedgerDocument } from './state.ts';
+import { DRIVE_FOLDER_MIME, findChildId, readDriveRootFolderId } from './finance.ts';
+import {
+  defaultGwsRunner,
+  emptyMonthState,
+  makeDriveDownloader,
+  mergeDocument,
+  parseStateMd,
+  resolveStateFile,
+  writeMonthState,
+  type DriveDownloader,
+  type GwsRunner,
+  type LedgerDocument,
+  type ProcessedMessage,
+} from './state.ts';
 
 // The finance orchestrator's intake half: take ONE downloaded document, get its classification from
 // the `classifier` judgment agent (LLM), then do the PROCEDURE in TS — normalize the amount, derive
@@ -101,4 +115,74 @@ export async function intakeDocument(
     runId: r.runId,
     detail: `classified ${doc.filename} as ${document.type}`,
   };
+}
+
+// ---- filing (the Drive write half of the orchestrator) -----------------------
+
+export interface FilingDeps {
+  run?: GwsRunner;
+  download?: DriveDownloader;
+  rootFolderId?: () => string | null;
+}
+
+export interface FilingResult {
+  ok: boolean;
+  driveFileId?: string;
+  detail: string;
+}
+
+/** Upload a local file to a Drive folder via the verified cwd-relative `+upload`. Returns its id. */
+function uploadFile(folderId: string, localPath: string, name: string, run: GwsRunner): { ok: boolean; fileId: string; detail: string } {
+  const res = run(
+    ['drive', '+upload', path.basename(localPath), '--parent', folderId, '--name', name, '--format', 'json'],
+    { cwd: path.dirname(localPath) },
+  );
+  if (!res.ok) return { ok: false, fileId: '', detail: res.detail };
+  try {
+    const j = JSON.parse(res.stdout) as { id?: string; file?: { id?: string } };
+    const id = j.id ?? j.file?.id ?? '';
+    return id ? { ok: true, fileId: id, detail: '' } : { ok: false, fileId: '', detail: 'upload returned no id' };
+  } catch {
+    return { ok: false, fileId: '', detail: 'upload returned non-JSON' };
+  }
+}
+
+/**
+ * File a classified document: upload its PDF to the type's Drive folder, then merge the row + the
+ * Processed-Gmail row into `state.md` (collision-guarded). Idempotent via `mergeDocument`'s dedup, so a
+ * retry re-files cleanly. Every resolution miss returns `ok:false` with a reason — never throws on a
+ * Drive miss; the only throw is an auth failure surfacing from `writeMonthState` (a dead credential
+ * must stop, not silently drop a verification).
+ */
+export function fileDocument(
+  month: string,
+  pdfPath: string,
+  processed: ProcessedMessage,
+  document: LedgerDocument,
+  deps: FilingDeps = {},
+): FilingResult {
+  const run = deps.run ?? defaultGwsRunner;
+  const download = deps.download ?? makeDriveDownloader(run);
+  const rootId = (deps.rootFolderId ?? readDriveRootFolderId)();
+  if (!rootId) return { ok: false, detail: 'no drive root folder id' };
+
+  const monthId = findChildId(rootId, month, DRIVE_FOLDER_MIME, run);
+  if (!monthId) return { ok: false, detail: `month folder ${month} not found` };
+  const typeFolderName = document.drivePath.split('/').filter(Boolean).pop() ?? 'Verifikationer';
+  const typeFolderId = findChildId(monthId, typeFolderName, DRIVE_FOLDER_MIME, run);
+  if (!typeFolderId) return { ok: false, detail: `type folder ${typeFolderName} not found` };
+
+  const up = uploadFile(typeFolderId, pdfPath, document.file, run);
+  if (!up.ok) return { ok: false, detail: `upload failed: ${up.detail}` };
+
+  const doppId = findChildId(monthId, '.doppelganger', DRIVE_FOLDER_MIME, run);
+  if (!doppId) return { ok: false, detail: '.doppelganger folder not found' };
+  const ref = resolveStateFile(doppId, run);
+  const state = ref ? parseStateMd(download(ref.fileId)) : emptyMonthState(month);
+  if (ref && state.month === '') return { ok: false, detail: 'state.md unreadable (corrupt download)' };
+
+  const merged = mergeDocument(state, processed, { ...document, driveFileId: up.fileId });
+  const w = writeMonthState(merged, doppId, ref, run);
+  if (!w.ok) return { ok: false, detail: `state write ${w.reason}` };
+  return { ok: true, driveFileId: up.fileId, detail: `filed ${document.file} → ${typeFolderName}/` };
 }

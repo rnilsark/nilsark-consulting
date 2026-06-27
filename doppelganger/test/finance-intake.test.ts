@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { insertEvent, insertQueue, openDb, type Db } from '../src/db.ts';
-import { documentFromClassification, intakeDocument, normalizeAmount } from '../src/adapters/finance-intake.ts';
+import { documentFromClassification, fileDocument, intakeDocument, normalizeAmount } from '../src/adapters/finance-intake.ts';
+import { emptyMonthState, renderStateMd, type GwsRunner, type GwsResult } from '../src/adapters/state.ts';
+
+const okR = (stdout: string): GwsResult => ({ ok: true, stdout, detail: '' });
 
 // ---- normalizeAmount --------------------------------------------------------
 
@@ -99,4 +102,55 @@ test('intakeDocument: a classifier that never finishes → failed, no document',
   const r = await intakeDocument(db, '2026-06', { filePath: '/x.pdf', filename: 'x.pdf' }, { pollMs: 1, timeoutMs: 5, sleepFn: async () => {} });
   assert.equal(r.status, 'failed');
   assert.equal(r.document, undefined);
+});
+
+// ---- fileDocument (Drive write orchestration, mocked gws) -------------------
+
+test('fileDocument: uploads the PDF and writes the normalized row into state.md', () => {
+  const STATE_MD = renderStateMd(emptyMonthState('2026-06')); // empty ledger to merge into
+  let written = '';
+  const run: GwsRunner = (args, opts) => {
+    if (args[2] === 'list') {
+      const p = args[args.indexOf('--params') + 1] ?? '';
+      if (p.includes("name='2026-06'")) return okR(JSON.stringify({ files: [{ id: 'MONTH' }] }));
+      if (p.includes("name='Leverantörsfakturor'")) return okR(JSON.stringify({ files: [{ id: 'TYPE' }] }));
+      if (p.includes('.doppelganger')) return okR(JSON.stringify({ files: [{ id: 'DOPP' }] }));
+      if (p.includes('state.md')) return okR(JSON.stringify({ files: [{ id: 'SM', headRevisionId: 'R1' }] }));
+      throw new Error(`unexpected list: ${p}`);
+    }
+    if (args[1] === '+upload') return okR(JSON.stringify({ id: 'PDFID' }));
+    if (args[2] === 'get') {
+      const p = args[args.indexOf('--params') + 1] ?? '';
+      if (p.includes('headRevisionId')) return okR(JSON.stringify({ headRevisionId: 'R1' })); // write guard re-check
+      if (args.includes('-o')) { writeFileSync(path.join(opts!.cwd!, 'download'), STATE_MD); return okR(''); }
+    }
+    if (args[2] === 'update') { written = readFileSync(path.join(opts!.cwd!, 'state.md'), 'utf8'); return okR('{}'); }
+    throw new Error(`unexpected: ${args.join(' ')}`);
+  };
+
+  const doc = documentFromClassification('Faktura_2908.pdf', '2026-06', {
+    type: 'leverantörsfaktura', supplier: 'Elwa AB', amount: '2 513,00', vat_amount: '502,50',
+    due_date: '2026-06-14', ocr_number: '290866', bank_account: 'BG 5542-9468', document_date: '2026-06-04',
+  });
+  const proc = { messageId: 'm9', date: '2026-06-04', from: 'Elwa', subject: 'Faktura 2908', attachmentFilename: 'Faktura_2908.pdf', status: 'classified' };
+
+  const r = fileDocument('2026-06', '/tmp/x/Faktura_2908.pdf', proc, doc, { run, rootFolderId: () => 'ROOT' });
+
+  assert.equal(r.ok, true, r.detail);
+  assert.equal(r.driveFileId, 'PDFID');
+  assert.ok(written.includes('Elwa AB'), 'supplier in the written ledger');
+  assert.ok(written.includes('2513.00'), 'NORMALIZED amount in the written ledger');
+  assert.ok(written.includes('PDFID'), 'drive_file_id stamped from the upload');
+});
+
+test('fileDocument: a missing month folder → ok:false (never throws, no write)', () => {
+  const run: GwsRunner = (args) => {
+    if (args[2] === 'list') return okR(JSON.stringify({ files: [] })); // nothing resolves
+    throw new Error('should not reach upload/write');
+  };
+  const doc = documentFromClassification('x.pdf', '2026-06', { type: 'kvitto', amount: '1,00' });
+  const proc = { messageId: 'm', date: '', from: '', subject: '', attachmentFilename: 'x.pdf', status: 'classified' };
+  const r = fileDocument('2026-06', '/tmp/x.pdf', proc, doc, { run, rootFolderId: () => 'ROOT' });
+  assert.equal(r.ok, false);
+  assert.match(r.detail, /month folder/);
 });
