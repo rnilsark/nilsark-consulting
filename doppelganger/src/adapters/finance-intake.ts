@@ -1,7 +1,16 @@
 import path from 'node:path';
 import { dispatchAndAwait, type DispatchOptions } from '../orchestrate.ts';
 import type { Db } from '../db.ts';
-import { DRIVE_FOLDER_MIME, findChildId, readDriveRootFolderId } from './finance.ts';
+import {
+  DRIVE_FOLDER_MIME,
+  findChildId,
+  operatorToday,
+  projectNotifyItem,
+  readDriveRootFolderId,
+  readFinanceStateFromDrive,
+  writeFinanceStateToDrive,
+  type DriveStateDeps,
+} from './finance.ts';
 import {
   defaultGwsRunner,
   emptyMonthState,
@@ -215,12 +224,15 @@ export async function runIntake(
   db: Db,
   month: string,
   doc: IntakeDoc,
-  deps: { dispatch?: DispatchOptions; filing?: FilingDeps } = {},
+  deps: { dispatch?: DispatchOptions; filing?: FilingDeps; financeState?: DriveStateDeps } = {},
 ): Promise<RunIntakeResult> {
   const ir = await intakeDocument(db, month, { filePath: doc.filePath, filename: doc.filename }, deps.dispatch);
   if (ir.status === 'failed' || !ir.document) {
     return { status: 'classify-failed', detail: ir.detail, runId: ir.runId };
   }
+  // File into the month the document's own date belongs to (a late-June invoice arriving in July
+  // lands in June), falling back to the caller's month when the date is unreadable.
+  const fileMonth = /^\d{4}-\d{2}/.test(ir.document.documentDate) ? ir.document.documentDate.slice(0, 7) : month;
   const processed: ProcessedMessage = {
     messageId: doc.messageId,
     date: doc.date,
@@ -229,8 +241,16 @@ export async function runIntake(
     attachmentFilename: doc.filename,
     status: ir.status === 'flagged' ? 'error' : 'classified',
   };
-  const fr = fileDocument(month, doc.filePath, processed, ir.document, deps.filing);
-  return fr.ok
-    ? { status: 'filed', detail: fr.detail, driveFileId: fr.driveFileId, runId: ir.runId }
-    : { status: 'file-failed', detail: fr.detail, runId: ir.runId };
+  const fr = fileDocument(fileMonth, doc.filePath, processed, ir.document, deps.filing);
+  if (!fr.ok) return { status: 'file-failed', detail: fr.detail, runId: ir.runId };
+
+  // Project an unpaid invoice into the gate's state.json (notify.items, fingerprint left stale) so the
+  // skip-gate surfaces it. A failure here doesn't un-file the doc — the ledger is the record of truth,
+  // and the weekly backstop still catches an item the gate didn't learn about. Best-effort.
+  let gateNote = '';
+  const projected = projectNotifyItem(readFinanceStateFromDrive(deps.financeState) ?? { version: 2, periods: {} }, fileMonth, ir.document, operatorToday());
+  const wj = writeFinanceStateToDrive(projected, deps.financeState);
+  if (!wj.ok) gateNote = ` (state.json not updated: ${wj.detail})`;
+
+  return { status: 'filed', detail: `${fr.detail}${gateNote}`, driveFileId: fr.driveFileId, runId: ir.runId };
 }

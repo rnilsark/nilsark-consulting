@@ -10,6 +10,7 @@ import {
   decideGate,
   lastFinanceGateSkip,
   maybeEnqueueFinanceRun,
+  projectNotifyItem,
   readFinanceStateFromDrive,
   shadowValidateMonth,
   type FinanceState,
@@ -379,4 +380,36 @@ test('maybeEnqueueFinanceRun: missing state.json fires (self-healing / conservat
   const log: GateLogEntry[] = [];
   const decision = maybeEnqueueFinanceRun(db, depsFor(null, log));
   assert.equal(decision.action, 'fire');
+});
+
+// ---- projectNotifyItem (intake → gate's state.json) ------------------------
+
+import type { LedgerDocument } from '../src/adapters/state.ts';
+const ledgerDoc = (over: Partial<LedgerDocument> = {}): LedgerDocument => ({
+  file: 'f.pdf', type: 'leverantörsfaktura', supplier: 'Avanza Pension', amount: '15352.00', currency: 'SEK',
+  dueDate: '2026-06-30', documentDate: '2026-06-08', ocrNumber: '', bankAccount: '', vatAmount: '0.00',
+  drivePath: '2026-06/Leverantörsfakturor/', driveFileId: 'D1', paymentStatus: 'unpaid', fortnoxSent: 'no', ...over,
+});
+
+test('projectNotifyItem: unpaid invoice → added to notify.items, fingerprint left STALE', () => {
+  const before: FinanceState = { version: 2, periods: { '2026-06': { export_status: 'pending', notify: { fingerprint: 'OLD', items: {} } } } };
+  const after = projectNotifyItem(before, '2026-06', ledgerDoc(), '2026-06-25'); // due 06-30 → due_soon
+  const items = after.periods!['2026-06'].notify!.items!;
+  assert.ok(items['Avanza Pension|15352.00|2026-06-30']);
+  assert.equal(items['Avanza Pension|15352.00|2026-06-30'].bucket, 'due_soon');
+  assert.equal(items['Avanza Pension|15352.00|2026-06-30'].acknowledged, false);
+  assert.equal(after.periods!['2026-06'].notify!.fingerprint, 'OLD', 'fingerprint left stale → gate fires');
+  assert.equal(before.periods!['2026-06'].notify!.items!['Avanza Pension|15352.00|2026-06-30'], undefined, 'input not mutated');
+});
+
+test('projectNotifyItem: a kvitto (n/a) or a doc with no due date is not actionable → unchanged', () => {
+  const before: FinanceState = { version: 2, periods: {} };
+  assert.equal(projectNotifyItem(before, '2026-06', ledgerDoc({ type: 'kvitto', paymentStatus: 'n/a' }), '2026-06-25'), before);
+  assert.equal(projectNotifyItem(before, '2026-06', ledgerDoc({ dueDate: '' }), '2026-06-25'), before);
+});
+
+test('projectNotifyItem: an overdue invoice gets bucket overdue; forces version 2', () => {
+  const after = projectNotifyItem({ periods: {} }, '2026-06', ledgerDoc({ dueDate: '2026-06-14' }), '2026-06-25');
+  assert.equal(after.version, 2);
+  assert.equal(after.periods!['2026-06'].notify!.items!['Avanza Pension|15352.00|2026-06-14'].bucket, 'overdue');
 });

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { config } from '../config.ts';
 import { insertQueue, lastEntrepreneurSuccess, type Db } from '../db.ts';
@@ -11,6 +12,7 @@ import {
   resolveStateFile,
   type DriveDownloader,
   type GwsRunner,
+  type LedgerDocument,
 } from './state.ts';
 
 // The finance orchestrator-star (deterministic, no LLM). It decides whether the daily
@@ -221,6 +223,66 @@ export function readFinanceStateFromDrive(deps: DriveStateDeps = {}): FinanceSta
     return JSON.parse(download(fileId)) as FinanceState;
   } catch {
     return null;
+  }
+}
+
+const UNPAID_STATUSES = new Set(['unpaid', 'overdue']);
+
+/**
+ * Project a freshly-filed unpaid invoice into the gate's `state.json` `notify.items`, keyed by the
+ * pinned docKey `supplier|amount|due_date`. The fingerprint is DELIBERATELY left stale — that
+ * staleness is exactly the signal the daily gate fires on (so the operator hears about a new invoice).
+ * Non-unpaid / no-due-date / unparseable-date docs are not actionable → state returned unchanged.
+ * Pure: the input is not mutated. Forces `version: 2` so the gate trusts it.
+ */
+export function projectNotifyItem(
+  state: FinanceState,
+  period: string,
+  doc: LedgerDocument,
+  today: string,
+): FinanceState {
+  if (!UNPAID_STATUSES.has(doc.paymentStatus) || !doc.dueDate) return state;
+  const bucket = bucketFor(doc.dueDate, today);
+  if (bucket === 'unparseable') return state;
+
+  const periods = { ...(state.periods ?? {}) };
+  const p = { ...(periods[period] ?? { export_status: 'pending' }) };
+  const notify = { ...(p.notify ?? { fingerprint: null, items: {} }) };
+  const items = { ...(notify.items ?? {}) };
+  items[`${doc.supplier}|${doc.amount}|${doc.dueDate}`] = {
+    bucket,
+    acknowledged: false,
+    last_notified: null,
+    supplier: doc.supplier,
+    amount: doc.amount,
+    due_date: doc.dueDate,
+  };
+  p.notify = { fingerprint: notify.fingerprint ?? null, items }; // fingerprint left stale ON PURPOSE
+  periods[period] = p;
+  return { version: 2, last_run: state.last_run, periods };
+}
+
+/** Write the run-metadata `state.json` back to the Drive mirror. JSON only, so no markdown-render. */
+export function writeFinanceStateToDrive(
+  state: FinanceState,
+  deps: DriveStateDeps = {},
+): { ok: boolean; detail: string } {
+  const run = deps.run ?? defaultGwsRunner;
+  const rootId = (deps.rootFolderId ?? readDriveRootFolderId)();
+  if (!rootId) return { ok: false, detail: 'no drive root folder id' };
+  const folderId = findChildId(rootId, '.doppelganger', DRIVE_FOLDER_MIME, run);
+  if (!folderId) return { ok: false, detail: 'no .doppelganger folder' };
+  const fileId = findChildId(folderId, 'state.json', null, run);
+
+  const dir = mkdtempSync(path.join(tmpdir(), 'dg-statejson-'));
+  try {
+    writeFileSync(path.join(dir, 'state.json'), JSON.stringify(state, null, 2));
+    const res = fileId
+      ? run(['drive', 'files', 'update', '--params', JSON.stringify({ fileId }), '--upload', 'state.json', '--upload-content-type', 'application/json'], { cwd: dir })
+      : run(['drive', '+upload', 'state.json', '--parent', folderId, '--name', 'state.json', '--format', 'json'], { cwd: dir });
+    return res.ok ? { ok: true, detail: 'wrote state.json' } : { ok: false, detail: res.detail };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 }
 
