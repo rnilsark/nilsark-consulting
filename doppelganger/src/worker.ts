@@ -16,7 +16,7 @@ import {
 import { agentsDir, callableBy, loadRegistry } from './registry.ts';
 import { loadAgentContext, loadAgentSettings, loadSoul } from './settings.ts';
 import { downloadAttachment } from './adapters/inbox.ts';
-import { operatorToday } from './adapters/finance.ts';
+import { operatorToday, prevMonth } from './adapters/finance.ts';
 import { downloadDriveFileToPath, runIntake, runReconcile } from './adapters/finance-intake.ts';
 import type { Order, OutFile, QueueRow, Registry, Reply, RunStatus } from './types.ts';
 
@@ -331,13 +331,6 @@ async function runIntakeAgent(db: Db, row: QueueRow, runDir: string, outPath: st
   const summary = `intake ${task.messageId ?? '?'}: ${lines.join(' | ') || 'no attachments'}`;
   writeFileSync(outPath, JSON.stringify({ status, summary }));
   return { status, summary, orders: [], cost: null };
-}
-
-/** The month a statement reconciles by default: last month (statements arrive for the prior period). */
-function prevMonth(today = operatorToday()): string {
-  const [y, m] = today.split('-').map(Number);
-  const d = new Date(Date.UTC(y, m - 2, 1)); // m-1 is current month index; m-2 is previous
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
 /**

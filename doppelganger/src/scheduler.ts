@@ -3,7 +3,7 @@ import { enqueue, jobs } from './adapters/schedule.ts';
 import { runHealthcheck } from './adapters/health.ts';
 import { ingestChat } from './adapters/chat.ts';
 import { maybeEnqueueFinanceRun, operatorToday, shadowValidateMonth } from './adapters/finance.ts';
-import { pollBankDrop } from './adapters/finance-intake.ts';
+import { bankStatementNudge, pollBankDrop } from './adapters/finance-intake.ts';
 import { ingestInbox } from './adapters/inbox.ts';
 import { config } from './config.ts';
 import type { Db } from './db.ts';
@@ -41,6 +41,12 @@ export function startScheduler(db: Db, channels: Map<string, Channel>): void {
         console.log(`[state-shadow] ${r.month} found=${r.found} clean=${r.clean} — ${r.detail}`);
       } catch (err) {
         console.error('[state-shadow] failed:', err);
+      }
+      try {
+        const n = bankStatementNudge(db); // early-month: ask for last month's statement if unreconciled
+        if (n.nudged) console.log(`[bank-nudge] ${n.detail}`);
+      } catch (err) {
+        console.error('[bank-nudge] failed:', err);
       }
     } catch (err) {
       console.error('[scheduler] finance heartbeat gate failed:', err);

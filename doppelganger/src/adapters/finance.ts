@@ -89,6 +89,13 @@ export function operatorToday(at: Date = new Date()): string {
   return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Stockholm' }).format(at);
 }
 
+/** The month before `today` (YYYY-MM) — what a bank statement reconciles, and what the nudge asks for. */
+export function prevMonth(today: string = operatorToday()): string {
+  const [y, m] = today.split('-').map(Number);
+  const d = new Date(Date.UTC(y, m - 2, 1)); // m-1 = current month index; m-2 = previous
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
 /** Parse a YYYY-MM-DD string to a UTC ms-epoch at midnight. NaN if it isn't a real ISO date. */
 function isoDayMs(day: string): number {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return NaN;
