@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
 import { getChannelCursor, insertQueue, setChannelCursor, type Db } from '../db.ts';
 
 /** Adapter source name — what the inbox queue rows are attributed to in the registry. */
@@ -7,10 +8,12 @@ export const INBOX_INGEST_SOURCE = 'inbox-ingest';
 /** Cursor key in `channel_state`. Not a real channel — distinct from stub/whatsapp/imessage. */
 export const INBOX_CURSOR_KEY = 'inbox';
 
-/** Attachment metadata only — filename + mimeType. NO bytes (lazy download happens in the run). */
+/** Attachment metadata only — NO bytes (lazy download via `downloadAttachment`). `attachmentId` is
+ *  Gmail's handle for fetching the bytes later. */
 export interface AttachmentMeta {
   filename: string;
   mimeType: string;
+  attachmentId: string;
 }
 
 /** One candidate email, reduced to the metadata the intake run needs to fetch it later. */
@@ -61,6 +64,7 @@ interface GmailPart {
   filename?: string;
   mimeType?: string;
   parts?: GmailPart[];
+  body?: { attachmentId?: string };
 }
 interface GmailGetResponse {
   internalDate?: string;
@@ -142,6 +146,29 @@ export function selectNewMessages(messages: InboxMessage[], handledIds: Iterable
   return messages.filter((m) => !handled.has(m.messageId));
 }
 
+/**
+ * Fetch one attachment's BYTES from Gmail and write the raw file to `destPath`. gws returns the data
+ * base64url-encoded in `{ "data": "..." }`; we decode and write. Returns true on success. This is the
+ * lazy byte-fetch the orchestrator does just before classifying a document.
+ */
+export function downloadAttachment(messageId: string, attachmentId: string, destPath: string): boolean {
+  const params = JSON.stringify({ userId: 'me', messageId, id: attachmentId });
+  const res = runGws(['gmail', 'users', 'messages', 'attachments', 'get', '--params', params, '--format', 'json']);
+  if (!res.ok) {
+    console.error(`[intake] attachment ${attachmentId} fetch failed: ${res.detail}`);
+    return false;
+  }
+  try {
+    const data = (JSON.parse(res.stdout) as { data?: string }).data;
+    if (!data) return false;
+    writeFileSync(destPath, Buffer.from(data, 'base64url'));
+    return true;
+  } catch {
+    console.error(`[intake] attachment ${attachmentId} returned non-JSON`);
+    return false;
+  }
+}
+
 function header(headers: GmailHeader[] | undefined, name: string): string {
   const h = (headers ?? []).find((x) => (x.name ?? '').toLowerCase() === name.toLowerCase());
   return h?.value ?? '';
@@ -151,7 +178,7 @@ function header(headers: GmailHeader[] | undefined, name: string): string {
 function collectAttachments(part: GmailPart | undefined, acc: AttachmentMeta[]): void {
   if (!part) return;
   if (part.filename && part.mimeType && !part.mimeType.startsWith('multipart/')) {
-    acc.push({ filename: part.filename, mimeType: part.mimeType });
+    acc.push({ filename: part.filename, mimeType: part.mimeType, attachmentId: part.body?.attachmentId ?? '' });
   }
   for (const child of part.parts ?? []) collectAttachments(child, acc);
 }

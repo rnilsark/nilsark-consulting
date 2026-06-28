@@ -42,7 +42,7 @@ function msg(id: string, internalDate: string, over: Partial<InboxMessage> = {})
     from: 'fakturor@leverantor.se',
     subject: 'Faktura',
     snippet: 'Att betala',
-    attachments: [{ filename: 'faktura.pdf', mimeType: 'application/pdf' }],
+    attachments: [{ filename: 'faktura.pdf', mimeType: 'application/pdf', attachmentId: 'att1' }],
     ...over,
   };
 }
@@ -82,7 +82,7 @@ test('ingest: enqueues one inbox row per message (metadata only), advances curso
   assert.equal(t1.messageId, 'm1');
   assert.equal(t1.from, 'fakturor@leverantor.se');
   assert.equal(t1.subject, 'Faktura');
-  assert.deepEqual(t1.attachments, [{ filename: 'faktura.pdf', mimeType: 'application/pdf' }]);
+  assert.deepEqual(t1.attachments, [{ filename: 'faktura.pdf', mimeType: 'application/pdf', attachmentId: 'att1' }]);
   assert.ok(!('data' in t1) && !('bytes' in t1), 'no attachment bytes in the enqueued row');
 
   assert.equal(getChannelCursor(db, INBOX_CURSOR_KEY), '2000');
@@ -144,10 +144,10 @@ test('parseGmailMessage: pulls headers + attachment parts, skips multipart wrapp
       mimeType: 'multipart/mixed',
       parts: [
         { mimeType: 'text/plain' }, // body, no filename → skipped
-        { mimeType: 'application/pdf', filename: 'faktura.pdf' },
+        { mimeType: 'application/pdf', filename: 'faktura.pdf', body: { attachmentId: 'A1' } },
         {
           mimeType: 'multipart/related',
-          parts: [{ mimeType: 'image/png', filename: 'logo.png' }],
+          parts: [{ mimeType: 'image/png', filename: 'logo.png', body: { attachmentId: 'A2' } }],
         },
       ],
     },
@@ -159,8 +159,8 @@ test('parseGmailMessage: pulls headers + attachment parts, skips multipart wrapp
   assert.equal(parsed.subject, 'Faktura 123');
   assert.equal(parsed.snippet, 'Faktura bifogad');
   assert.deepEqual(parsed.attachments, [
-    { filename: 'faktura.pdf', mimeType: 'application/pdf' },
-    { filename: 'logo.png', mimeType: 'image/png' },
+    { filename: 'faktura.pdf', mimeType: 'application/pdf', attachmentId: 'A1' },
+    { filename: 'logo.png', mimeType: 'image/png', attachmentId: 'A2' },
   ]);
 });
 
