@@ -262,6 +262,26 @@ export function projectNotifyItem(
   return { version: 2, last_run: state.last_run, periods };
 }
 
+/**
+ * After a reconcile: mark the period `reconciled` and drop the now-paid invoices from `notify.items`
+ * (paid → no longer actionable). Fingerprint left stale so the gate re-derives. Pure; forces v2.
+ */
+export function markReconciled(
+  state: FinanceState,
+  period: string,
+  paid: Array<{ supplier: string; amount: string; dueDate: string }>,
+): FinanceState {
+  const periods = { ...(state.periods ?? {}) };
+  const p = { ...(periods[period] ?? {}) };
+  p.export_status = 'reconciled';
+  const notify = { ...(p.notify ?? { fingerprint: null, items: {} }) };
+  const items = { ...(notify.items ?? {}) };
+  for (const d of paid) delete items[`${d.supplier}|${d.amount}|${d.dueDate}`];
+  p.notify = { fingerprint: notify.fingerprint ?? null, items };
+  periods[period] = p;
+  return { version: 2, last_run: state.last_run, periods };
+}
+
 /** Write the run-metadata `state.json` back to the Drive mirror. JSON only, so no markdown-render. */
 export function writeFinanceStateToDrive(
   state: FinanceState,

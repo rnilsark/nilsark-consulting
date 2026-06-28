@@ -4,6 +4,7 @@ import type { Db } from '../db.ts';
 import {
   DRIVE_FOLDER_MIME,
   findChildId,
+  markReconciled,
   operatorToday,
   projectNotifyItem,
   readDriveRootFolderId,
@@ -12,6 +13,7 @@ import {
   type DriveStateDeps,
 } from './finance.ts';
 import {
+  applyReconciliation,
   defaultGwsRunner,
   emptyMonthState,
   makeDriveDownloader,
@@ -19,6 +21,7 @@ import {
   parseStateMd,
   resolveStateFile,
   writeMonthState,
+  type BankTransaction,
   type DriveDownloader,
   type GwsRunner,
   type LedgerDocument,
@@ -253,4 +256,92 @@ export async function runIntake(
   if (!wj.ok) gateNote = ` (state.json not updated: ${wj.detail})`;
 
   return { status: 'filed', detail: `${fr.detail}${gateNote}`, driveFileId: fr.driveFileId, runId: ir.runId };
+}
+
+// ---- reconcile orchestrator -------------------------------------------------
+
+/** Map the reconciler's snake_case result rows to BankTransaction, normalizing amounts. */
+function normalizeTransactions(raw: unknown): BankTransaction[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((t) => {
+    const r = t as Record<string, unknown>;
+    return {
+      date: String(r.date ?? ''),
+      description: String(r.description ?? ''),
+      amount: normalizeAmount(String(r.amount ?? '')),
+      currency: String(r.currency ?? 'SEK') || 'SEK',
+      matchedToFile: String(r.matched_to_file ?? ''),
+      matchConfidence: String(r.match_confidence ?? 'unmatched'),
+    };
+  });
+}
+
+export interface ReconcileResult {
+  status: 'reconciled' | 'no-matches' | 'failed';
+  detail: string;
+  matched: number;
+  runId?: string;
+}
+
+/**
+ * Reconcile one bank statement against `month`'s unpaid invoices: read the ledger, dispatch the
+ * `reconciler` (judgment) with the unpaid set, apply (mark paid + record txns) to state.md, then mark
+ * the period reconciled + drop paid items from state.json. Mirrors runIntake; never throws on a Drive
+ * miss. The statement file is already on local disk (downloaded by the reconcile worker).
+ */
+export async function runReconcile(
+  db: Db,
+  month: string,
+  statement: { filePath: string; filename: string },
+  deps: { dispatch?: DispatchOptions; filing?: FilingDeps; financeState?: DriveStateDeps } = {},
+): Promise<ReconcileResult> {
+  const run = deps.filing?.run ?? defaultGwsRunner;
+  const download = deps.filing?.download ?? makeDriveDownloader(run);
+  const rootId = (deps.filing?.rootFolderId ?? readDriveRootFolderId)();
+  if (!rootId) return { status: 'failed', detail: 'no drive root folder id', matched: 0 };
+  const monthId = findChildId(rootId, month, DRIVE_FOLDER_MIME, run);
+  if (!monthId) return { status: 'failed', detail: `month folder ${month} not found`, matched: 0 };
+  const doppId = findChildId(monthId, '.doppelganger', DRIVE_FOLDER_MIME, run);
+  if (!doppId) return { status: 'failed', detail: 'no .doppelganger folder', matched: 0 };
+  const ref = resolveStateFile(doppId, run);
+  if (!ref) return { status: 'failed', detail: `no state.md for ${month}`, matched: 0 };
+  const state = parseStateMd(download(ref.fileId));
+  if (state.month === '') return { status: 'failed', detail: 'state.md unreadable', matched: 0 };
+
+  const unpaid = state.documents.filter(
+    (d) => (d.type === 'leverantörsfaktura' || d.type === 'skattekonto') && (d.paymentStatus === 'unpaid' || d.paymentStatus === 'overdue'),
+  );
+  const invoices = unpaid.map((d) => ({
+    file: d.file, supplier: d.supplier, amount: d.amount, ocr_number: d.ocrNumber, due_date: d.dueDate, type: d.type,
+  }));
+
+  const r = await dispatchAndAwait(
+    db,
+    'reconciler',
+    JSON.stringify({ statementPath: statement.filePath, filename: statement.filename, invoices }),
+    deps.dispatch,
+  );
+  if (r.state !== 'done' || (r.status !== 'success' && r.status !== 'flagged') || !r.result) {
+    return { status: 'failed', detail: `reconciler ${r.state}/${r.status ?? '?'}`, matched: 0, runId: r.runId };
+  }
+
+  const transactions = normalizeTransactions((r.result as { transactions?: unknown }).transactions);
+  const applied = applyReconciliation(state, transactions);
+  const w = writeMonthState(applied, doppId, ref, run);
+  if (!w.ok) return { status: 'failed', detail: `state write ${w.reason}`, matched: 0, runId: r.runId };
+
+  const paidFiles = new Set(
+    transactions.filter((t) => (t.matchConfidence === 'exact' || t.matchConfidence === 'fuzzy') && t.matchedToFile).map((t) => t.matchedToFile),
+  );
+  const paidDocs = unpaid.filter((d) => paidFiles.has(d.file)).map((d) => ({ supplier: d.supplier, amount: d.amount, dueDate: d.dueDate }));
+  const fs = readFinanceStateFromDrive(deps.financeState) ?? { version: 2, periods: {} };
+  writeFinanceStateToDrive(markReconciled(fs, month, paidDocs), deps.financeState);
+
+  const matched = paidFiles.size;
+  return {
+    status: matched > 0 ? 'reconciled' : 'no-matches',
+    detail: `${month}: matched ${matched}/${unpaid.length} invoices across ${transactions.length} txns`,
+    matched,
+    runId: r.runId,
+  };
 }

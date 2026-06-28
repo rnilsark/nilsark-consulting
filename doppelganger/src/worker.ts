@@ -17,7 +17,7 @@ import { agentsDir, callableBy, loadRegistry } from './registry.ts';
 import { loadAgentContext, loadAgentSettings, loadSoul } from './settings.ts';
 import { downloadAttachment } from './adapters/inbox.ts';
 import { operatorToday } from './adapters/finance.ts';
-import { runIntake } from './adapters/finance-intake.ts';
+import { runIntake, runReconcile } from './adapters/finance-intake.ts';
 import type { Order, OutFile, QueueRow, Registry, Reply, RunStatus } from './types.ts';
 
 export interface Outcome {
@@ -333,6 +333,42 @@ async function runIntakeAgent(db: Db, row: QueueRow, runDir: string, outPath: st
   return { status, summary, orders: [], cost: null };
 }
 
+/** The month a statement reconciles by default: last month (statements arrive for the prior period). */
+function prevMonth(today = operatorToday()): string {
+  const [y, m] = today.split('-').map(Number);
+  const d = new Date(Date.UTC(y, m - 2, 1)); // m-1 is current month index; m-2 is previous
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+/**
+ * The `reconcile` agent is TS: download the statement (Gmail attachment), then `runReconcile` against
+ * last month — read its unpaid invoices, dispatch the `reconciler` child for matching, apply (mark
+ * paid + record txns) to state.md + state.json. Writes out.json so the result is recorded.
+ */
+async function runReconcileAgent(db: Db, row: QueueRow, runDir: string, outPath: string): Promise<Outcome> {
+  let task: { messageId?: string; month?: string; attachments?: Array<{ filename?: string; attachmentId?: string }> };
+  try {
+    task = JSON.parse(row.task);
+  } catch {
+    writeFileSync(outPath, JSON.stringify({ status: 'error', summary: 'reconcile: task was not JSON' }));
+    return { status: 'error', summary: 'reconcile: task was not JSON', orders: [], cost: null };
+  }
+  const month = task.month ?? prevMonth();
+  const lines: string[] = [];
+  for (const att of task.attachments ?? []) {
+    if (!att.filename || !att.attachmentId) { lines.push(`${att.filename ?? '?'}: no attachmentId`); continue; }
+    const filePath = path.join(runDir, att.filename);
+    if (!downloadAttachment(task.messageId ?? '', att.attachmentId, filePath)) { lines.push(`${att.filename}: download failed`); continue; }
+    const r = await runReconcile(db, month, { filePath, filename: att.filename }, { dispatch: { parent: row.run_id } });
+    lines.push(`${att.filename}: ${r.status} — ${r.detail}`);
+  }
+  const failed = lines.filter((l) => l.includes('failed') || l.includes('download failed')).length;
+  const status: RunStatus = lines.length === 0 ? 'flagged' : failed === 0 ? 'success' : failed === lines.length ? 'error' : 'flagged';
+  const summary = `reconcile ${month}: ${lines.join(' | ') || 'no statement attachment'}`;
+  writeFileSync(outPath, JSON.stringify({ status, summary }));
+  return { status, summary, orders: [], cost: null };
+}
+
 async function main(): Promise<void> {
   const queueId = Number(process.argv[2]);
   if (!Number.isInteger(queueId)) {
@@ -356,6 +392,8 @@ async function main(): Promise<void> {
   let outcome: Outcome;
   if (row.agent === 'intake') {
     outcome = await runIntakeAgent(db, row, runDir, outPath); // TS orchestrator, not claude
+  } else if (row.agent === 'reconcile') {
+    outcome = await runReconcileAgent(db, row, runDir, outPath); // TS orchestrator, not claude
   } else {
     acknowledgeChat(db, row); // sign of life BEFORE the slow LLM run; drains ahead of the reply
     const { cost, failure } = runClaude(row, buildPrompt(row, outPath, registry, db), registry, runDir);

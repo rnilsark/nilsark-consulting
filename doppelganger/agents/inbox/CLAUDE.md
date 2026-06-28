@@ -61,9 +61,10 @@ Always write `out.json`. Carry the message fields through to the agent you order
   ```json
   { "status": "success", "summary": "intake: leverantörsfaktura", "orders": [ { "agent": "intake", "task": "{\"messageId\":\"<id>\",\"from\":\"...\",\"subject\":\"...\",\"attachments\":[{\"filename\":\"...\",\"attachmentId\":\"...\"}]}" } ] }
   ```
-- **Bank statement → reconcile** (still the entrepreneur):
+- **Bank statement → reconcile** (the TS `reconcile` orchestrator — matches last month's invoices).
+  Carry `messageId` and `attachments` (with each `attachmentId`) verbatim:
   ```json
-  { "status": "success", "summary": "reconcile: bank statement", "orders": [ { "agent": "entrepreneur", "task": "{\"mode\":\"reconcile\",\"messageId\":\"<id>\",\"from\":\"...\",\"subject\":\"...\",\"snippet\":\"...\",\"attachments\":[...]}" } ] }
+  { "status": "success", "summary": "reconcile: bank statement", "orders": [ { "agent": "reconcile", "task": "{\"messageId\":\"<id>\",\"attachments\":[{\"filename\":\"...\",\"attachmentId\":\"...\"}]}" } ] }
   ```
 - **Not finance → drop** (no order — the message just stops here):
   ```json

@@ -9,6 +9,7 @@ import {
   computeFingerprint,
   decideGate,
   lastFinanceGateSkip,
+  markReconciled,
   maybeEnqueueFinanceRun,
   projectNotifyItem,
   readFinanceStateFromDrive,
@@ -412,4 +413,12 @@ test('projectNotifyItem: an overdue invoice gets bucket overdue; forces version 
   const after = projectNotifyItem({ periods: {} }, '2026-06', ledgerDoc({ dueDate: '2026-06-14' }), '2026-06-25');
   assert.equal(after.version, 2);
   assert.equal(after.periods!['2026-06'].notify!.items!['Avanza Pension|15352.00|2026-06-14'].bucket, 'overdue');
+});
+
+test('markReconciled: sets export_status reconciled and drops paid items from notify', () => {
+  const before: FinanceState = { version: 2, periods: { '2026-05': { export_status: 'pending', notify: { fingerprint: 'X', items: { 'Elwa AB|2513.00|2026-05-14': { acknowledged: false, supplier: 'Elwa AB', amount: '2513.00', due_date: '2026-05-14' } } } } } };
+  const after = markReconciled(before, '2026-05', [{ supplier: 'Elwa AB', amount: '2513.00', dueDate: '2026-05-14' }]);
+  assert.equal(after.periods!['2026-05'].export_status, 'reconciled');
+  assert.equal(after.periods!['2026-05'].notify!.items!['Elwa AB|2513.00|2026-05-14'], undefined, 'paid item dropped');
+  assert.ok(before.periods!['2026-05'].notify!.items!['Elwa AB|2513.00|2026-05-14'], 'input not mutated');
 });
