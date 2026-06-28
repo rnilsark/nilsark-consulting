@@ -3,6 +3,7 @@ import { enqueue, jobs } from './adapters/schedule.ts';
 import { runHealthcheck } from './adapters/health.ts';
 import { ingestChat } from './adapters/chat.ts';
 import { maybeEnqueueFinanceRun, operatorToday, shadowValidateMonth } from './adapters/finance.ts';
+import { pollBankDrop } from './adapters/finance-intake.ts';
 import { ingestInbox } from './adapters/inbox.ts';
 import { config } from './config.ts';
 import type { Db } from './db.ts';
@@ -55,6 +56,16 @@ export function startScheduler(db: Db, channels: Map<string, Channel>): void {
     }
   });
   console.log(`[scheduler] inbox ingest @ "${config.inboxPollCron}"`);
+
+  cron.schedule(config.bankDropCron, () => {
+    try {
+      const { enqueued } = pollBankDrop(db); // bank statements uploaded straight to Drive → reconcile
+      if (enqueued > 0) console.log(`[bank-drop] enqueued ${enqueued} statement(s) → reconcile`);
+    } catch (err) {
+      console.error('[scheduler] bank-drop poll failed:', err);
+    }
+  });
+  console.log(`[scheduler] bank-drop poll @ "${config.bankDropCron}"`);
 
   if (channels.size > 0) {
     cron.schedule(config.chatPollCron, async () => {

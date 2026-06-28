@@ -43,6 +43,8 @@ interface OperatorConfig {
   inboxPollCron: string;
   inboxSenders: string[];
   financeBackstopMaxAgeHours: number;
+  bankDropFolder: string;
+  bankDropCron: string;
 }
 
 const defaults: OperatorConfig = {
@@ -76,6 +78,10 @@ const defaults: OperatorConfig = {
   // this many hours, the gate fires unconditionally (the periodic full sweep that catches anything
   // wrongly skipped). 168h = 7 days. Lower it to distrust the gate harder; never disable it.
   financeBackstopMaxAgeHours: 168,
+  // The Drive folder (under DRIVE_ROOT) the operator drops bank statements into — polled so a
+  // statement uploaded straight to Drive triggers a reconcile (no self-email needed). Create it once.
+  bankDropFolder: 'Kontoutdrag',
+  bankDropCron: '*/15 * * * *',
 };
 
 /** The env var that overrides each operator key (keys not listed are file/default only). */
@@ -103,6 +109,8 @@ const envVar: Record<keyof OperatorConfig, string> = {
   inboxPollCron: 'DOPPELGANGER_INBOX_POLL_CRON',
   inboxSenders: 'DOPPELGANGER_INBOX_SENDERS',
   financeBackstopMaxAgeHours: 'DOPPELGANGER_FINANCE_BACKSTOP_MAX_AGE_HOURS',
+  bankDropFolder: 'DOPPELGANGER_BANK_DROP_FOLDER',
+  bankDropCron: 'DOPPELGANGER_BANK_DROP_CRON',
 };
 
 function fail(msg: string): never {
@@ -215,6 +223,8 @@ function resolve(home: string): OperatorConfig {
     inboxPollCron: cronExpr(raw('inboxPollCron'), 'inboxPollCron'),
     inboxSenders: strList(raw('inboxSenders'), 'inboxSenders'),
     financeBackstopMaxAgeHours: posInt(raw('financeBackstopMaxAgeHours'), 'financeBackstopMaxAgeHours'),
+    bankDropFolder: nonEmptyStr(raw('bankDropFolder'), 'bankDropFolder'),
+    bankDropCron: cronExpr(raw('bankDropCron'), 'bankDropCron'),
   };
 }
 

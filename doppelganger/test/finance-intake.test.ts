@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { insertEvent, insertQueue, openDb, type Db } from '../src/db.ts';
-import { documentFromClassification, fileDocument, intakeDocument, normalizeAmount } from '../src/adapters/finance-intake.ts';
+import { documentFromClassification, fileDocument, intakeDocument, normalizeAmount, pollBankDrop } from '../src/adapters/finance-intake.ts';
 import { emptyMonthState, renderStateMd, type GwsRunner, type GwsResult } from '../src/adapters/state.ts';
 
 const okR = (stdout: string): GwsResult => ({ ok: true, stdout, detail: '' });
@@ -153,4 +153,34 @@ test('fileDocument: a missing month folder → ok:false (never throws, no write)
   const r = fileDocument('2026-06', '/tmp/x.pdf', proc, doc, { run, rootFolderId: () => 'ROOT' });
   assert.equal(r.ok, false);
   assert.match(r.detail, /month folder/);
+});
+
+// ---- pollBankDrop (Drive drop folder → reconcile) --------------------------
+
+test('pollBankDrop: enqueues a reconcile per new statement file, deduped, skips subfolders', () => {
+  const db = openDb(':memory:');
+  const run: GwsRunner = (args) => {
+    const p = args[args.indexOf('--params') + 1] ?? '';
+    if (p.includes("name='Kontoutdrag'")) return okR(JSON.stringify({ files: [{ id: 'DROP' }] }));
+    if (p.includes("'DROP' in parents")) return okR(JSON.stringify({ files: [
+      { id: 'F1', name: 'juni.csv', mimeType: 'text/csv' },
+      { id: 'SUB', name: 'old', mimeType: 'application/vnd.google-apps.folder' },
+    ] }));
+    throw new Error(`unexpected: ${p}`);
+  };
+  assert.equal(pollBankDrop(db, { run, rootFolderId: () => 'ROOT' }).enqueued, 1); // F1 only; SUB is a folder
+  assert.equal(pollBankDrop(db, { run, rootFolderId: () => 'ROOT' }).enqueued, 0); // deduped on re-poll
+  const rows = db.prepare("SELECT task FROM queue WHERE agent='reconcile'").all() as Array<{ task: string }>;
+  assert.equal(rows.length, 1);
+  assert.equal((JSON.parse(rows[0].task) as { driveFileId: string }).driveFileId, 'F1');
+});
+
+test('pollBankDrop: no drop folder yet → no-op', () => {
+  const db = openDb(':memory:');
+  const run: GwsRunner = (args) => {
+    const p = args[args.indexOf('--params') + 1] ?? '';
+    if (p.includes("name='Kontoutdrag'")) return okR(JSON.stringify({ files: [] })); // folder not created
+    throw new Error(`unexpected: ${p}`);
+  };
+  assert.equal(pollBankDrop(db, { run, rootFolderId: () => 'ROOT' }).enqueued, 0);
 });

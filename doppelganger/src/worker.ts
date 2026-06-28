@@ -17,7 +17,7 @@ import { agentsDir, callableBy, loadRegistry } from './registry.ts';
 import { loadAgentContext, loadAgentSettings, loadSoul } from './settings.ts';
 import { downloadAttachment } from './adapters/inbox.ts';
 import { operatorToday } from './adapters/finance.ts';
-import { runIntake, runReconcile } from './adapters/finance-intake.ts';
+import { downloadDriveFileToPath, runIntake, runReconcile } from './adapters/finance-intake.ts';
 import type { Order, OutFile, QueueRow, Registry, Reply, RunStatus } from './types.ts';
 
 export interface Outcome {
@@ -346,7 +346,7 @@ function prevMonth(today = operatorToday()): string {
  * paid + record txns) to state.md + state.json. Writes out.json so the result is recorded.
  */
 async function runReconcileAgent(db: Db, row: QueueRow, runDir: string, outPath: string): Promise<Outcome> {
-  let task: { messageId?: string; month?: string; attachments?: Array<{ filename?: string; attachmentId?: string }> };
+  let task: { messageId?: string; month?: string; driveFileId?: string; filename?: string; attachments?: Array<{ filename?: string; attachmentId?: string }> };
   try {
     task = JSON.parse(row.task);
   } catch {
@@ -355,6 +355,19 @@ async function runReconcileAgent(db: Db, row: QueueRow, runDir: string, outPath:
   }
   const month = task.month ?? prevMonth();
   const lines: string[] = [];
+
+  // Drive-drop source: one statement uploaded straight to Drive.
+  if (task.driveFileId && task.filename) {
+    const filePath = path.join(runDir, task.filename);
+    if (downloadDriveFileToPath(task.driveFileId, filePath)) {
+      const r = await runReconcile(db, month, { filePath, filename: task.filename }, { dispatch: { parent: row.run_id } });
+      lines.push(`${task.filename}: ${r.status} — ${r.detail}`);
+    } else {
+      lines.push(`${task.filename}: drive download failed`);
+    }
+  }
+
+  // Email source: statement(s) as Gmail attachments.
   for (const att of task.attachments ?? []) {
     if (!att.filename || !att.attachmentId) { lines.push(`${att.filename ?? '?'}: no attachmentId`); continue; }
     const filePath = path.join(runDir, att.filename);

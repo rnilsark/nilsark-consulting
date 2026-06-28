@@ -1,6 +1,8 @@
+import { existsSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { dispatchAndAwait, type DispatchOptions } from '../orchestrate.ts';
-import type { Db } from '../db.ts';
+import { config } from '../config.ts';
+import { getChannelCursor, insertQueue, setChannelCursor, type Db } from '../db.ts';
 import {
   DRIVE_FOLDER_MIME,
   findChildId,
@@ -344,4 +346,62 @@ export async function runReconcile(
     matched,
     runId: r.runId,
   };
+}
+
+// ---- Drive drop folder → reconcile ------------------------------------------
+
+/** Download a Drive file's bytes to `destPath` (raw — handles both the -o-file and stdout cases). */
+export function downloadDriveFileToPath(fileId: string, destPath: string, run: GwsRunner = defaultGwsRunner): boolean {
+  const res = run(['drive', 'files', 'get', '--params', JSON.stringify({ fileId, alt: 'media' }), '-o', path.basename(destPath)], { cwd: path.dirname(destPath) });
+  if (!res.ok) return false;
+  if (existsSync(destPath)) return true; // gws wrote the file (PDF/binary case)
+  try {
+    writeFileSync(destPath, res.stdout); // gws streamed to stdout (text/csv/json case)
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export interface BankDropDeps {
+  run?: GwsRunner;
+  rootFolderId?: () => string | null;
+  folderName?: string;
+}
+
+/**
+ * Poll the Drive "drop" folder for bank statements uploaded straight to Drive (no self-email). Each
+ * new file enqueues a `reconcile` run carrying its `driveFileId`. Dedup is a processed-id set in
+ * `channel_state` (key `bankdrop`), so a statement is enqueued once. Missing folder / gws error → 0.
+ */
+export function pollBankDrop(db: Db, deps: BankDropDeps = {}): { enqueued: number } {
+  const run = deps.run ?? defaultGwsRunner;
+  const rootId = (deps.rootFolderId ?? readDriveRootFolderId)();
+  if (!rootId) return { enqueued: 0 };
+  const folderId = findChildId(rootId, deps.folderName ?? config.bankDropFolder, DRIVE_FOLDER_MIME, run);
+  if (!folderId) return { enqueued: 0 }; // drop folder not created yet → nothing to do
+  const res = run(['drive', 'files', 'list', '--params', JSON.stringify({ q: `'${folderId}' in parents and trashed=false`, fields: 'files(id,name,mimeType)' }), '--format', 'json']);
+  if (!res.ok) return { enqueued: 0 };
+  let files: Array<{ id?: string; name?: string; mimeType?: string }>;
+  try {
+    files = (JSON.parse(res.stdout) as { files?: typeof files }).files ?? [];
+  } catch {
+    return { enqueued: 0 };
+  }
+  let processed: string[];
+  try {
+    processed = JSON.parse(getChannelCursor(db, 'bankdrop') ?? '[]') as string[];
+  } catch {
+    processed = [];
+  }
+  const seen = new Set(processed);
+  let enqueued = 0;
+  for (const f of files) {
+    if (!f.id || f.mimeType === DRIVE_FOLDER_MIME || seen.has(f.id)) continue;
+    insertQueue(db, { agent: 'reconcile', task: JSON.stringify({ driveFileId: f.id, filename: f.name ?? 'statement' }), parent: null });
+    seen.add(f.id);
+    enqueued++;
+  }
+  if (enqueued > 0) setChannelCursor(db, 'bankdrop', JSON.stringify([...seen]));
+  return { enqueued };
 }
