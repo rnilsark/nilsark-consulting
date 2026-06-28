@@ -118,7 +118,7 @@ test('routeReplies: queues a reply to a known conversation on the outbox (resolv
     replies: [{ conversationId: 'C1', text: 'Ni är lediga 🎉' }],
     cost: null,
   };
-  routeReplies(db, outcome);
+  routeReplies(db, outcome, 'C1'); // run's own conversation is C1
 
   const pending = selectPendingOutbox(db);
   assert.equal(pending.length, 1);
@@ -136,7 +136,18 @@ test('routeReplies: drops a reply to a conversation never seen inbound (nothing 
     orders: [],
     replies: [{ conversationId: 'ATTACKER', text: 'secret' }],
     cost: null,
-  });
+  }, 'ATTACKER');
+  assert.equal(selectPendingOutbox(db).length, 0);
+});
+
+test('routeReplies: drops a reply to a KNOWN conversation that is not this run\'s own (no cross-talk)', () => {
+  const db = freshDb();
+  // C1 is a real, known conversation — but this run was handed C2 (or none). It must NOT reach C1.
+  insertChatMessage(db, { channel: 'stub', conversation_id: 'C1', sender: 'mom', direction: 'in', text: 'hi' });
+  routeReplies(db, {
+    status: 'success', summary: 'a judgment kernel tried to message the operator', orders: [],
+    replies: [{ conversationId: 'C1', text: 'spurious push' }], cost: null,
+  }, null); // a run with no conversation (classifier/reconciler/cron) can reply to nothing
   assert.equal(selectPendingOutbox(db).length, 0);
 });
 
@@ -147,7 +158,7 @@ test('routeReplies: error status queues nothing', () => {
   });
   routeReplies(db, {
     status: 'error', summary: 'boom', orders: [], replies: [{ conversationId: 'C1', text: 'x' }], cost: null,
-  });
+  }, 'C1');
   assert.equal(selectPendingOutbox(db).length, 0);
 });
 
@@ -157,7 +168,7 @@ test('drainOutbox: delivers via the live channel, logs outbound, marks sent', as
   routeReplies(db, {
     status: 'success', summary: 'ok', orders: [],
     replies: [{ conversationId: 'C1', text: 'Ni är lediga 🎉' }], cost: null,
-  });
+  }, 'C1');
   const sent: Array<{ conversationId: string; text: string }> = [];
   await drainOutbox(db, new Map([['stub', captureChannel('stub', sent)]]));
 
@@ -178,7 +189,7 @@ test('drainOutbox: send failure leaves the row pending for retry', async () => {
   insertChatMessage(db, { channel: 'stub', conversation_id: 'C1', sender: 'mom', direction: 'in', text: 'q' });
   routeReplies(db, {
     status: 'success', summary: 'ok', orders: [], replies: [{ conversationId: 'C1', text: 'x' }], cost: null,
-  });
+  }, 'C1');
   const flaky: Channel = {
     name: 'stub',
     poll: () => ({ messages: [], cursor: '' }),

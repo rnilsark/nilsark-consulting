@@ -16,7 +16,8 @@ The file is a PDF or an image already on local disk. **Read** it.
 2. Classify + extract using the invoice tools (do not reinvent the rules):
    - `swedish-invoice-tools:classify-invoice` → the document **type**.
    - `swedish-invoice-tools:extract-invoice-fields` → the structured fields.
-3. Return the result (see Output). Do **not** touch Drive, Gmail, state, or any other file. No orders.
+3. Return the result (see Output). Do **not** touch Drive, Gmail, state, or any other file. **No orders,
+   no replies** — you never message the operator.
 
 `type` is one of: `leverantörsfaktura` | `kvitto` | `skattekonto` | `kundfaktura` | `unknown`.
 Extract (blank string if genuinely absent — **never guess**): `supplier`, `amount` (total incl. VAT),

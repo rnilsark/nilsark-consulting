@@ -263,9 +263,16 @@ export function acknowledgeChat(db: Db, row: QueueRow, ack: () => string = pickA
  * the channel is resolved from that inbound history, never from message content — which closes
  * "exfiltrate to an attacker address".
  */
-export function routeReplies(db: Db, outcome: Outcome): void {
+export function routeReplies(db: Db, outcome: Outcome, ownConversationId: string | null): void {
   if (outcome.status === 'error') return; // poisonous run → no replies
   for (const reply of outcome.replies ?? []) {
+    // A run may ONLY reply to the conversation it was handed. A run with no conversation (a cron run,
+    // or a judgment/orchestrator agent like classifier/reconciler/intake) can reply to nothing — this
+    // stops an agent that read an untrusted document from pushing a message to the operator.
+    if (!ownConversationId || reply.conversationId !== ownConversationId) {
+      console.error(`[worker] dropping reply to ${reply.conversationId} — not this run's conversation`);
+      continue;
+    }
     const channelName = inboundConversationChannel(db, reply.conversationId);
     if (!channelName) {
       console.error(`[worker] dropping reply to unknown conversation ${reply.conversationId}`);
@@ -405,7 +412,7 @@ async function main(): Promise<void> {
     const { cost, failure } = runClaude(row, buildPrompt(row, outPath, registry, db), registry, runDir);
     outcome = readOutcome(outPath, cost, failure);
   }
-  routeReplies(db, outcome);
+  routeReplies(db, outcome, conversationIdFor(row)); // a run may only reply to its OWN conversation
   finalize(db, row, outcome);
   console.log(`[worker] finished status=${outcome.status} cost=${outcome.cost ?? '?'} — ${outcome.summary}`);
 }

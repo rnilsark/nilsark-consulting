@@ -33,7 +33,8 @@ The file is on local disk. **Read** it.
      payee/description. (Flag-worthy, but still report it.)
    - **prior-month** — matches a carry-over invoice from an earlier month.
    - **unmatched** — matches nothing (salary, owner transfer, fee, or a missing invoice).
-4. Return the result. Do **not** touch Drive, Gmail, or state. No orders. No payments.
+4. Return the result. Do **not** touch Drive, Gmail, or state. **No orders, no replies, no payments** —
+   you never message the operator; the orchestrator decides what (if anything) to report.
 
 ## Output
 
