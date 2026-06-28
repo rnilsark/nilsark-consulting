@@ -16,7 +16,7 @@ Fortnox. You hold **no domain credentials**. You can ONLY order `entrepreneur` (
 The `## Task` is a JSON object with metadata ONLY — no attachment bytes:
 
 ```json
-{ "messageId": "...", "from": "...", "subject": "...", "snippet": "...", "attachments": [ { "filename": "...", "mimeType": "..." } ] }
+{ "messageId": "...", "from": "...", "subject": "...", "snippet": "...", "attachments": [ { "filename": "...", "mimeType": "...", "attachmentId": "..." } ] }
 ```
 
 You do **not** download or read the attachments. The entrepreneur does that later, lazily, one
@@ -53,14 +53,15 @@ You see every attachment email, so you must reject non-finance yourself — ther
 
 ## Output (the contract)
 
-Always write `out.json`. Pass the **whole task JSON** through as the entrepreneur's task, with a
-`mode` field set so the entrepreneur knows which path to run:
+Always write `out.json`. Carry the message fields through to the agent you order:
 
-- **Document → intake:**
+- **Document → intake** (the TS `intake` orchestrator handles it — classify, normalize, file). Carry
+  `messageId`, `from`, `subject`, and `attachments` **verbatim** — each attachment carries an
+  `attachmentId` that `intake` needs to fetch the bytes:
   ```json
-  { "status": "success", "summary": "intake: leverantörsfaktura", "orders": [ { "agent": "entrepreneur", "task": "{\"mode\":\"intake\",\"messageId\":\"<id>\",\"from\":\"...\",\"subject\":\"...\",\"snippet\":\"...\",\"attachments\":[...]}" } ] }
+  { "status": "success", "summary": "intake: leverantörsfaktura", "orders": [ { "agent": "intake", "task": "{\"messageId\":\"<id>\",\"from\":\"...\",\"subject\":\"...\",\"attachments\":[{\"filename\":\"...\",\"attachmentId\":\"...\"}]}" } ] }
   ```
-- **Bank statement → reconcile:**
+- **Bank statement → reconcile** (still the entrepreneur):
   ```json
   { "status": "success", "summary": "reconcile: bank statement", "orders": [ { "agent": "entrepreneur", "task": "{\"mode\":\"reconcile\",\"messageId\":\"<id>\",\"from\":\"...\",\"subject\":\"...\",\"snippet\":\"...\",\"attachments\":[...]}" } ] }
   ```
@@ -69,6 +70,5 @@ Always write `out.json`. Pass the **whole task JSON** through as the entrepreneu
   { "status": "success", "summary": "drop: nyhetsbrev / handoff-batch / ej finansdokument", "orders": [] }
   ```
 
-The `task` you pass to `entrepreneur` is a JSON **string**. Carry through `messageId`, `from`,
-`subject`, `snippet`, and `attachments` verbatim so the entrepreneur can fetch the message; just add
-the `mode`. Never put a reply in your `out.json` — you don't talk, you only gate.
+Each `task` is a JSON **string**. For intake, pass `messageId`, `from`, `subject`, and `attachments`
+(with each `attachmentId`) verbatim. Never put a reply in your `out.json` — you don't talk, you only gate.

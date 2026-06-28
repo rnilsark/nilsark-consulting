@@ -68,6 +68,8 @@ export interface DispatchOptions {
   timeoutMs?: number;
   runsDir?: string;
   sleepFn?: (ms: number) => Promise<void>;
+  /** Parent run_id, so the dispatched run is a CHILD (constellation edge + registry caller check). */
+  parent?: string | null;
 }
 
 /**
@@ -86,7 +88,7 @@ export async function dispatchAndAwait(
   const timeoutMs = opts.timeoutMs ?? 180_000;
   const sleepFn = opts.sleepFn ?? sleep;
 
-  const queueId = insertQueue(db, { agent, task, parent: null });
+  const queueId = insertQueue(db, { agent, task, parent: opts.parent ?? null });
   let knownRunId: string | null = null;
   const deadline = Date.now() + timeoutMs;
 

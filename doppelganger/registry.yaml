@@ -59,6 +59,14 @@ agents:
   # out.json `result`. No Drive, no Gmail, no state — pure judgment, so it's cheap, isolated, and
   # independently testable. The finance orchestrator dispatches it per document and does the filing.
   classifier:
-    can_be_called_by: [entrepreneur]   # the finance orchestrator hands it one document at a time
+    can_be_called_by: [entrepreneur, intake]  # the finance orchestrator (entrepreneur today, intake now) dispatches it
     tools: "Read,Write,Skill"          # Read the file, Skill for the invoice tools, Write the out.json
     model: sonnet
+
+  # The finance intake orchestrator (the entrepreneur decomposition, live). NOT an LLM: the worker runs
+  # `runIntake` in TS for this agent — download the attachment(s), dispatch `classifier` for judgment,
+  # normalize + file to Drive + state.md + state.json. Ordered by the `inbox` router for documents, in
+  # place of a full entrepreneur run. No tools/model: it's code, not a claude run.
+  intake:
+    can_be_called_by: [inbox]
+    tools: ""

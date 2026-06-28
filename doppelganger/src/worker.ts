@@ -15,6 +15,9 @@ import {
 } from './db.ts';
 import { agentsDir, callableBy, loadRegistry } from './registry.ts';
 import { loadAgentContext, loadAgentSettings, loadSoul } from './settings.ts';
+import { downloadAttachment } from './adapters/inbox.ts';
+import { operatorToday } from './adapters/finance.ts';
+import { runIntake } from './adapters/finance-intake.ts';
 import type { Order, OutFile, QueueRow, Registry, Reply, RunStatus } from './types.ts';
 
 export interface Outcome {
@@ -295,7 +298,42 @@ export function finalize(db: Db, row: QueueRow, outcome: Outcome): void {
   })();
 }
 
-function main(): void {
+/**
+ * The `intake` agent is TS, not an LLM: download each attachment, then `runIntake` (classify via the
+ * `classifier` child run, normalize, file to Drive + state.md + state.json). Writes out.json so the
+ * result is recorded like any run. The classifier is dispatched as a CHILD (parent = this run).
+ */
+async function runIntakeAgent(db: Db, row: QueueRow, runDir: string, outPath: string): Promise<Outcome> {
+  let task: { messageId?: string; from?: string; subject?: string; date?: string; attachments?: Array<{ filename?: string; attachmentId?: string }> };
+  try {
+    task = JSON.parse(row.task);
+  } catch {
+    const o = { status: 'error' as RunStatus, summary: 'intake: task was not JSON', orders: [] as Order[], cost: null };
+    writeFileSync(outPath, JSON.stringify({ status: o.status, summary: o.summary }));
+    return o;
+  }
+  const month = operatorToday().slice(0, 7);
+  const lines: string[] = [];
+  for (const att of task.attachments ?? []) {
+    if (!att.filename || !att.attachmentId) { lines.push(`${att.filename ?? '?'}: no attachmentId`); continue; }
+    const filePath = path.join(runDir, att.filename);
+    if (!downloadAttachment(task.messageId ?? '', att.attachmentId, filePath)) { lines.push(`${att.filename}: download failed`); continue; }
+    const r = await runIntake(
+      db,
+      month,
+      { filePath, filename: att.filename, messageId: task.messageId ?? '', from: task.from ?? '', date: task.date ?? '', subject: task.subject ?? '' },
+      { dispatch: { parent: row.run_id } },
+    );
+    lines.push(`${att.filename}: ${r.status} — ${r.detail}`);
+  }
+  const filed = lines.filter((l) => l.includes('filed')).length;
+  const status: RunStatus = lines.length === 0 ? 'flagged' : filed === lines.length ? 'success' : filed > 0 ? 'flagged' : 'error';
+  const summary = `intake ${task.messageId ?? '?'}: ${lines.join(' | ') || 'no attachments'}`;
+  writeFileSync(outPath, JSON.stringify({ status, summary }));
+  return { status, summary, orders: [], cost: null };
+}
+
+async function main(): Promise<void> {
   const queueId = Number(process.argv[2]);
   if (!Number.isInteger(queueId)) {
     console.error('usage: worker.ts <queueId>');
@@ -315,14 +353,22 @@ function main(): void {
   const outPath = path.join(runDir, 'out.json');
 
   console.log(`[worker] run=${row.run_id} agent=${row.agent} task=${row.task}`);
-  acknowledgeChat(db, row); // sign of life BEFORE the slow LLM run; drains ahead of the reply
-  const { cost, failure } = runClaude(row, buildPrompt(row, outPath, registry, db), registry, runDir);
-  const outcome = readOutcome(outPath, cost, failure);
+  let outcome: Outcome;
+  if (row.agent === 'intake') {
+    outcome = await runIntakeAgent(db, row, runDir, outPath); // TS orchestrator, not claude
+  } else {
+    acknowledgeChat(db, row); // sign of life BEFORE the slow LLM run; drains ahead of the reply
+    const { cost, failure } = runClaude(row, buildPrompt(row, outPath, registry, db), registry, runDir);
+    outcome = readOutcome(outPath, cost, failure);
+  }
   routeReplies(db, outcome);
   finalize(db, row, outcome);
   console.log(`[worker] finished status=${outcome.status} cost=${outcome.cost ?? '?'} — ${outcome.summary}`);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  main();
+  main().catch((err) => {
+    console.error('[worker] fatal:', err);
+    process.exit(1);
+  });
 }
