@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import {
+  applyReconciliation,
   computeSummary,
   emptyMonthState,
   isAuthFailure,
@@ -207,6 +208,37 @@ test('mergeDocument: re-merging the same document is idempotent (no duplicates)'
   assert.equal(s.documents.length, 1);
   assert.equal(s.processed.length, 1);
   assert.equal(s.documents[0].type, 'leverantörsfaktura', 'the row is replaced, not duplicated');
+});
+
+// ---- applyReconciliation ----------------------------------------------------
+
+const bankTxn = (over: Partial<MonthState['bank'][number]> = {}): MonthState['bank'][number] => ({
+  date: '2026-06-20', description: 'Betalning', amount: '-2513.00', currency: 'SEK', matchedToFile: '', matchConfidence: 'unmatched', ...over,
+});
+
+test('applyReconciliation: an exact match marks the invoice paid and records the transaction', () => {
+  const base = mergeDocument(emptyMonthState('2026-06'), sampleProc('m1', 'Faktura_2908.pdf'),
+    sampleDoc('Faktura_2908.pdf', 'leverantörsfaktura'));
+  base.documents[0].paymentStatus = 'unpaid';
+  const out = applyReconciliation(base, [bankTxn({ matchedToFile: 'Faktura_2908.pdf', matchConfidence: 'exact' })]);
+  assert.equal(out.documents[0].paymentStatus, 'paid');
+  assert.equal(out.bank.length, 1);
+  assert.equal(base.documents[0].paymentStatus, 'unpaid', 'input not mutated');
+});
+
+test('applyReconciliation: an unmatched transaction is recorded but settles nothing', () => {
+  const base = mergeDocument(emptyMonthState('2026-06'), sampleProc('m1', 'a.pdf'), sampleDoc('a.pdf', 'leverantörsfaktura'));
+  base.documents[0].paymentStatus = 'unpaid';
+  const out = applyReconciliation(base, [bankTxn({ description: 'Lön', amount: '-30000.00' })]);
+  assert.equal(out.documents[0].paymentStatus, 'unpaid');
+  assert.equal(out.bank.length, 1);
+});
+
+test('applyReconciliation: re-applying the same statement is idempotent (no dup transactions)', () => {
+  const txns = [bankTxn({ matchedToFile: 'a.pdf', matchConfidence: 'exact' })];
+  let s = applyReconciliation(emptyMonthState('2026-06'), txns);
+  s = applyReconciliation(s, txns);
+  assert.equal(s.bank.length, 1);
 });
 
 // ---- render shape (byte-level canonical form) -------------------------------

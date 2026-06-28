@@ -70,3 +70,19 @@ agents:
   intake:
     can_be_called_by: [inbox]
     tools: ""
+
+  # Second judgment kernel: match a bank statement against the month's unpaid invoices. Stateless —
+  # given the statement file + the invoice list, return each transaction with its matched invoice +
+  # confidence. No Drive/Gmail/state; the reconcile orchestrator applies the matches.
+  reconciler:
+    can_be_called_by: [reconcile, entrepreneur]
+    tools: "Read,Write,Skill"
+    model: sonnet
+
+  # The finance reconcile orchestrator (TS, not an LLM): the worker runs runReconcile — read the
+  # month's unpaid invoices, dispatch `reconciler` for the matching, apply (mark paid + record txns)
+  # to state.md + state.json. Triggered by the `inbox` router (a statement emailed in) or the Drive
+  # drop-folder poll (a statement uploaded straight to Drive).
+  reconcile:
+    can_be_called_by: [inbox]
+    tools: ""

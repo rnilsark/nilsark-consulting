@@ -97,6 +97,31 @@ export function mergeDocument(
   return { ...state, documents, processed: procRows };
 }
 
+const SETTLED_CONFIDENCE = new Set(['exact', 'fuzzy']);
+
+/**
+ * Apply a reconciliation: append the bank transactions (deduped on date+amount+description) and mark
+ * any invoice a transaction matched (`matchConfidence` exact/fuzzy) as `paid`. `prior-month` and
+ * `unmatched` rows are recorded but settle nothing in THIS month. Returns a NEW MonthState; idempotent
+ * via the dedup, so a re-run of the same statement is safe.
+ */
+export function applyReconciliation(state: MonthState, transactions: BankTransaction[]): MonthState {
+  const seen = new Set(state.bank.map((b) => `${b.date}|${b.amount}|${b.description}`));
+  const bank = [...state.bank];
+  for (const t of transactions) {
+    const key = `${t.date}|${t.amount}|${t.description}`;
+    if (!seen.has(key)) {
+      bank.push(t);
+      seen.add(key);
+    }
+  }
+  const paidFiles = new Set(
+    transactions.filter((t) => SETTLED_CONFIDENCE.has(t.matchConfidence) && t.matchedToFile).map((t) => t.matchedToFile),
+  );
+  const documents = state.documents.map((d) => (paidFiles.has(d.file) ? { ...d, paymentStatus: 'paid' } : d));
+  return { ...state, bank, documents };
+}
+
 /**
  * A `gws` failure whose detail names a credential problem. Auth failures must STOP the caller — never
  * be treated as a transient/retryable error — the same rule the agent's CLAUDE.md auth guard enforces.
