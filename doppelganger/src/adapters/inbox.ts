@@ -78,7 +78,7 @@ interface GmailGetResponse {
  * parts tree, so attachment filenames wouldn't be visible. `full` still does NOT pull the attachment
  * BYTES — attachments are returned as `attachmentId` references; only the email body is inlined, and
  * that is read-and-discarded here (never enqueued). The lazy attachment download still happens later
- * inside `entrepreneur:intake`, one message per run, so each document gets an isolated context.
+ * inside the `intake` orchestrator, one message per run, so each document gets an isolated context.
  * Returns messages newer than `cursor` (strict `internalDate >`).
  */
 /**
@@ -124,7 +124,7 @@ export const defaultGmailList: GmailList = (allowlist, cursor) => {
     .filter((m) => Number(m.internalDate) > since); // strictly newer than the cursor → not yet seen
 };
 
-// ---- daily catch-all sweep (step 3: the mailbox work the entrepreneur's run does today, in TS) -----
+// ---- daily catch-all sweep (step 3: the daily collect backstop, in TS) -----
 
 /** The daily-sweep query: every attachment-bearing inbox mail since the month's first day. */
 export function buildSweepQuery(firstDay: string): string {
@@ -201,7 +201,7 @@ export function parseGmailMessage(id: string, msg: GmailGetResponse): InboxMessa
  * Dumb ingest poll (no LLM): list new `has:attachment` mail from allowlisted senders, enqueue one
  * `inbox` row per message carrying METADATA ONLY (`{messageId, from, subject, snippet, attachments}`)
  * — never the attachment bytes — and advance the cursor to the newest `internalDate` seen. The bytes
- * are lazily fetched later, one message per `entrepreneur:intake` run, so each document gets an
+ * are lazily fetched later, one message per `intake` run, so each document gets an
  * isolated context. The `inbox` agent (haiku) is the gate that decides intake vs reconcile; this
  * adapter just gets candidates onto the queue.
  */

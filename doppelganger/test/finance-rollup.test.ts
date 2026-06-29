@@ -249,3 +249,58 @@ test('applyFinanceRollup: persists notify.items + fingerprint to state.json, upl
   assert.ok(stateJson.includes('Fortnox|450|2026-06-25'), 'the unpaid item is persisted to state.json');
   assert.ok(stateJson.includes('"version": 2'));
 });
+
+// ---- ackPayment (chat ack fast-path) ----------------------------------------
+
+import { ackPayment } from '../src/adapters/finance-rollup.ts';
+
+test('ackPayment: marks the named supplier acknowledged, recomputes fingerprint, persists', () => {
+  const state = {
+    version: 2,
+    periods: {
+      '2026-06': {
+        export_status: 'pending',
+        notify: {
+          fingerprint: 'old',
+          items: {
+            'Fortnox|450|2026-06-25': { bucket: 'due_soon', acknowledged: false, last_notified: null, supplier: 'Fortnox', amount: '450', due_date: '2026-06-25' },
+            'Telia|1250|2026-06-20': { bucket: 'due_soon', acknowledged: false, last_notified: null, supplier: 'Telia', amount: '1250', due_date: '2026-06-20' },
+          },
+        },
+      },
+    },
+  };
+  let written = '';
+  const run: GwsRunner = (args, opts) => {
+    const p = args[args.indexOf('--params') + 1] ?? '';
+    if (args[2] === 'list') {
+      if (p.includes('.doppelganger')) return okR(JSON.stringify({ files: [{ id: 'D' }] }));
+      if (p.includes('state.json')) return okR(JSON.stringify({ files: [{ id: 'SJ' }] }));
+      return okR(JSON.stringify({ files: [] }));
+    }
+    if (args[2] === 'update') { written = rf(nodePath.join(opts!.cwd!, 'state.json'), 'utf8'); return okR('{}'); }
+    throw new Error(`unexpected: ${args.join(' ')}`);
+  };
+  const fsDeps = { run, download: () => JSON.stringify(state), rootFolderId: () => 'ROOT' };
+
+  const r = ackPayment('fortnox', { financeState: fsDeps, today: '2026-06-15' });
+  assert.equal(r.matched, 1);
+  const out = JSON.parse(written) as typeof state;
+  assert.equal(out.periods['2026-06'].notify.items['Fortnox|450|2026-06-25'].acknowledged, true);
+  assert.equal(out.periods['2026-06'].notify.items['Telia|1250|2026-06-20'].acknowledged, false); // untouched
+  assert.notEqual(out.periods['2026-06'].notify.fingerprint, 'old'); // recomputed (Fortnox drops from the set)
+});
+
+test('ackPayment: no match → reads but never writes, matched 0', () => {
+  const run: GwsRunner = (args) => {
+    if (args[2] === 'list') {
+      const p = args[args.indexOf('--params') + 1] ?? '';
+      if (p.includes('.doppelganger')) return okR(JSON.stringify({ files: [{ id: 'D' }] }));
+      if (p.includes('state.json')) return okR(JSON.stringify({ files: [{ id: 'SJ' }] }));
+      return okR(JSON.stringify({ files: [] }));
+    }
+    throw new Error('must not write when there is no match'); // update/+upload would throw
+  };
+  const r = ackPayment('Nonexistent', { financeState: { run, download: () => JSON.stringify({ version: 2, periods: {} }), rootFolderId: () => 'ROOT' }, today: '2026-06-15' });
+  assert.equal(r.matched, 0);
+});

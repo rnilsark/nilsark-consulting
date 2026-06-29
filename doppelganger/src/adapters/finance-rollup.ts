@@ -420,3 +420,34 @@ export function applyFinanceRollup(db: Db, deps: RollupDeps & { settings?: Finan
 
   return { periods: g.periods.length, pushed, closed, detail: `${g.periods.length} period(s)${pushed ? ', pushed' : ''}${closed ? `, closed ${closed}` : ''}` };
 }
+
+/**
+ * The chat ack fast-path (the entrepreneur's old ack loop, in TS): the operator said they paid a
+ * supplier, so mark every matching `notify.items` entry `acknowledged: true` (suppressing it from
+ * pushes) and recompute that period's fingerprint so the gate goes quiet. Match is a case-insensitive
+ * substring of the docKey (which embeds the supplier). No Gmail, no Drive document I/O — just state.json.
+ * The bank statement still wins later: a reconcile that doesn't confirm the payment re-surfaces it.
+ */
+export function ackPayment(supplier: string, deps: { financeState?: DriveStateDeps; today?: string } = {}): { matched: number } {
+  const needle = supplier.trim().toLowerCase();
+  if (!needle) return { matched: 0 };
+  const fs = readFinanceStateFromDrive(deps.financeState);
+  if (!fs) return { matched: 0 };
+  const today = deps.today ?? operatorToday();
+  const periodsOut = { ...(fs.periods ?? {}) };
+  let matched = 0;
+  for (const [month, meta] of Object.entries(periodsOut)) {
+    const items = { ...(meta.notify?.items ?? {}) };
+    let changed = false;
+    for (const [key, it] of Object.entries(items)) {
+      if (key.toLowerCase().includes(needle) && it.acknowledged !== true) {
+        items[key] = { ...it, acknowledged: true };
+        matched++;
+        changed = true;
+      }
+    }
+    if (changed) periodsOut[month] = { ...meta, notify: { fingerprint: computeFingerprint(items, today), items } };
+  }
+  if (matched > 0) writeFinanceStateToDrive({ version: 2, last_run: fs.last_run, periods: periodsOut }, deps.financeState);
+  return { matched };
+}

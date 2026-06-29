@@ -18,7 +18,8 @@ import { loadAgentContext, loadAgentSettings, loadSoul } from './settings.ts';
 import { downloadAttachment } from './adapters/inbox.ts';
 import { operatorToday, prevMonth } from './adapters/finance.ts';
 import { downloadDriveFileToPath, runIntake, runReconcile } from './adapters/finance-intake.ts';
-import { applyFinanceRollup } from './adapters/finance-rollup.ts';
+import { ackPayment, applyFinanceRollup } from './adapters/finance-rollup.ts';
+import { FINANCE_RUN_TASK } from './adapters/finance.ts';
 import type { Order, OutFile, QueueRow, Registry, Reply, RunStatus } from './types.ts';
 
 export interface Outcome {
@@ -34,9 +35,9 @@ export interface Outcome {
 /** The conversation a row belongs to: chat tasks ARE the id; triage tasks carry it in JSON. */
 function conversationIdFor(row: QueueRow): string | null {
   if (row.agent === 'chat') return row.task;
-  // triage carries the conversationId in JSON; entrepreneur does too when delegated from chat
+  // triage carries the conversationId in JSON; finance does too when delegated from chat
   // (its cron task is the plain string "run", which simply parses to null → no conversation).
-  if (row.agent === 'triage' || row.agent === 'entrepreneur') {
+  if (row.agent === 'triage' || row.agent === 'finance') {
     try {
       const parsed = JSON.parse(row.task) as { conversationId?: string };
       return typeof parsed.conversationId === 'string' ? parsed.conversationId : null;
@@ -384,15 +385,34 @@ async function runReconcileAgent(db: Db, row: QueueRow, runDir: string, outPath:
 }
 
 /**
- * The `finance` agent is TS, not an LLM: run the heartbeat rollup (overdue/notify/fingerprint/anomaly/
- * todo/push + close the first ready month). Deterministic, so there's no claude run and no cost. Writes
- * out.json so the run is recorded like any other.
+ * The `finance` agent is TS, not an LLM. Three task shapes:
+ *   - the plain string `run` (the heartbeat cron) → the full rollup, no reply.
+ *   - `{ "mode": "ack", "supplier", "conversationId" }` (from chat) → mark the supplier paid, reply.
+ *   - `{ "mode": "run", "conversationId" }` (from chat) → run the rollup + reply into that thread.
+ * Deterministic, so there's no claude run and no cost. Writes out.json + returns the Outcome (replies
+ * included so the worker's routeReplies delivers them, scoped to this run's own conversation).
  */
-function runFinanceAgent(db: Db, outPath: string): Outcome {
-  const r = applyFinanceRollup(db);
-  const summary = `finance: ${r.detail}`;
-  writeFileSync(outPath, JSON.stringify({ status: 'success', summary }));
-  return { status: 'success', summary, orders: [], cost: null };
+function runFinanceAgent(db: Db, row: QueueRow, outPath: string): Outcome {
+  interface FinanceTask { mode?: string; supplier?: string; conversationId?: string }
+  let task: FinanceTask | null = null;
+  if (row.task !== FINANCE_RUN_TASK) { try { task = JSON.parse(row.task) as FinanceTask; } catch { task = null; } }
+
+  let summary: string;
+  let replies: Reply[] = [];
+  if (task?.mode === 'ack') {
+    const { matched } = ackPayment(task.supplier ?? '');
+    const text = matched > 0
+      ? `Noterat — markerat ${task.supplier} som betald. Undertrycks tills kontoutdraget bekräftar.`
+      : `Hittade ingen obetald post som matchar "${task.supplier ?? ''}".`;
+    summary = `ack ${task.supplier ?? ''}: ${matched} matchad`;
+    if (task.conversationId) replies = [{ conversationId: task.conversationId, text }];
+  } else {
+    const r = applyFinanceRollup(db);
+    summary = `finance: ${r.detail}`;
+    if (task?.conversationId) replies = [{ conversationId: task.conversationId, text: `Ekonomi uppdaterad (${r.detail}). Se din todo.` }];
+  }
+  writeFileSync(outPath, JSON.stringify({ status: 'success', summary, replies }));
+  return { status: 'success', summary, orders: [], replies, cost: null };
 }
 
 async function main(): Promise<void> {
@@ -421,7 +441,7 @@ async function main(): Promise<void> {
   } else if (row.agent === 'reconcile') {
     outcome = await runReconcileAgent(db, row, runDir, outPath); // TS orchestrator, not claude
   } else if (row.agent === 'finance') {
-    outcome = runFinanceAgent(db, outPath); // TS heartbeat rollup (the dissolved entrepreneur run)
+    outcome = runFinanceAgent(db, row, outPath); // TS heartbeat rollup (the dissolved entrepreneur run)
   } else {
     acknowledgeChat(db, row); // sign of life BEFORE the slow LLM run; drains ahead of the reply
     const { cost, failure } = runClaude(row, buildPrompt(row, outPath, registry, db), registry, runDir);

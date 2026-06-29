@@ -74,7 +74,7 @@ const defaults: OperatorConfig = {
   // Email senders whose `has:attachment` mail the inbox poll surfaces. Empty = no `from:` filter
   // (every attachment-bearing message is a candidate) — set this to the finance senders in prod.
   inboxSenders: [],
-  // The finance skip-gate's backstop window: if no successful entrepreneur run has landed within
+  // The finance skip-gate's backstop window: if no successful finance run has landed within
   // this many hours, the gate fires unconditionally (the periodic full sweep that catches anything
   // wrongly skipped). 168h = 7 days. Lower it to distrust the gate harder; never disable it.
   financeBackstopMaxAgeHours: 168,
