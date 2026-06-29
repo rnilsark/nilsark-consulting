@@ -17,8 +17,9 @@ Your `## Task` is JSON:
 }
 ```
 
-`invoices` are this month's unpaid items (plus any prior-month carry-over the orchestrator includes).
-The file is on local disk. **Read** it.
+`invoices` span the **two most recent open months** — the orchestrator does NOT tell you which month
+the statement covers; you read that off the statement itself (its transaction dates). The file is on
+local disk. **Read** it.
 
 ## What to do
 
@@ -45,6 +46,7 @@ Write `out.json` with the transactions in `result`:
   "status": "success",
   "summary": "Matchade 3 av 5 transaktioner mot fakturor.",
   "result": {
+    "period": "2026-06",
     "transactions": [
       { "date": "2026-06-14", "description": "<Referens>", "amount": "-2513.00", "currency": "SEK", "matched_to_file": "Faktura_2908.pdf", "match_confidence": "exact" }
     ]
@@ -52,6 +54,9 @@ Write `out.json` with the transactions in `result`:
 }
 ```
 
+- `period` is the `YYYY-MM` the statement **covers** — the month its transaction dates fall in (the
+  dominant month if a few straddle the boundary). This is how the orchestrator knows which month to
+  reconcile; read it off the statement, never guess.
 - `amount` is signed and normalized (dot-decimal). `matched_to_file` is the invoice's `file` (or `""`
   when unmatched). `match_confidence` is one of `exact` | `fuzzy` | `prior-month` | `unmatched`.
 - A single payment that clears multiple invoices, or anything ambiguous → leave it `unmatched` and say

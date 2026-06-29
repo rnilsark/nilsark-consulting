@@ -16,7 +16,7 @@ import {
 import { agentsDir, callableBy, loadRegistry } from './registry.ts';
 import { loadAgentContext, loadAgentSettings, loadSoul } from './settings.ts';
 import { downloadAttachment } from './adapters/inbox.ts';
-import { operatorToday, prevMonth } from './adapters/finance.ts';
+import { operatorToday } from './adapters/finance.ts';
 import { downloadDriveFileToPath, runIntake, runReconcile } from './adapters/finance-intake.ts';
 import { ackPayment, applyFinanceRollup } from './adapters/finance-rollup.ts';
 import { FINANCE_RUN_TASK } from './adapters/finance.ts';
@@ -343,26 +343,26 @@ async function runIntakeAgent(db: Db, row: QueueRow, runDir: string, outPath: st
 }
 
 /**
- * The `reconcile` agent is TS: download the statement (Gmail attachment), then `runReconcile` against
- * last month — read its unpaid invoices, dispatch the `reconciler` child for matching, apply (mark
- * paid + record txns) to state.md + state.json. Writes out.json so the result is recorded.
+ * The `reconcile` agent is TS: download the statement (Gmail attachment or Drive drop), then
+ * `runReconcile` — which reads the statement's OWN dates to decide the period (no month is assumed),
+ * dispatches the `reconciler` child for matching, and applies (mark paid + record txns) to the right
+ * month's state.md + state.json. Writes out.json so the result is recorded.
  */
 async function runReconcileAgent(db: Db, row: QueueRow, runDir: string, outPath: string): Promise<Outcome> {
-  let task: { messageId?: string; month?: string; driveFileId?: string; filename?: string; attachments?: Array<{ filename?: string; attachmentId?: string }> };
+  let task: { messageId?: string; driveFileId?: string; filename?: string; attachments?: Array<{ filename?: string; attachmentId?: string }> };
   try {
     task = JSON.parse(row.task);
   } catch {
     writeFileSync(outPath, JSON.stringify({ status: 'error', summary: 'reconcile: task was not JSON' }));
     return { status: 'error', summary: 'reconcile: task was not JSON', orders: [], cost: null };
   }
-  const month = task.month ?? prevMonth();
   const lines: string[] = [];
 
   // Drive-drop source: one statement uploaded straight to Drive.
   if (task.driveFileId && task.filename) {
     const filePath = path.join(runDir, task.filename);
     if (downloadDriveFileToPath(task.driveFileId, filePath)) {
-      const r = await runReconcile(db, month, { filePath, filename: task.filename }, { dispatch: { parent: row.run_id } });
+      const r = await runReconcile(db, { filePath, filename: task.filename }, { dispatch: { parent: row.run_id } });
       lines.push(`${task.filename}: ${r.status} — ${r.detail}`);
     } else {
       lines.push(`${task.filename}: drive download failed`);
@@ -374,12 +374,12 @@ async function runReconcileAgent(db: Db, row: QueueRow, runDir: string, outPath:
     if (!att.filename || !att.attachmentId) { lines.push(`${att.filename ?? '?'}: no attachmentId`); continue; }
     const filePath = path.join(runDir, att.filename);
     if (!downloadAttachment(task.messageId ?? '', att.attachmentId, filePath)) { lines.push(`${att.filename}: download failed`); continue; }
-    const r = await runReconcile(db, month, { filePath, filename: att.filename }, { dispatch: { parent: row.run_id } });
+    const r = await runReconcile(db, { filePath, filename: att.filename }, { dispatch: { parent: row.run_id } });
     lines.push(`${att.filename}: ${r.status} — ${r.detail}`);
   }
   const failed = lines.filter((l) => l.includes('failed') || l.includes('download failed')).length;
   const status: RunStatus = lines.length === 0 ? 'flagged' : failed === 0 ? 'success' : failed === lines.length ? 'error' : 'flagged';
-  const summary = `reconcile ${month}: ${lines.join(' | ') || 'no statement attachment'}`;
+  const summary = `reconcile: ${lines.join(' | ') || 'no statement attachment'}`;
   writeFileSync(outPath, JSON.stringify({ status, summary }));
   return { status, summary, orders: [], cost: null };
 }

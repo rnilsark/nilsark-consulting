@@ -28,6 +28,7 @@ import {
   type DriveDownloader,
   type GwsRunner,
   type LedgerDocument,
+  type MonthState,
   type ProcessedMessage,
 } from './state.ts';
 import { defaultGmailSweep, selectNewMessages, type GmailSweep } from './inbox.ts';
@@ -287,37 +288,69 @@ export interface ReconcileResult {
   runId?: string;
 }
 
+const SETTLED_CONFIDENCE = new Set(['exact', 'fuzzy', 'prior-month']);
+
+/** The dominant YYYY-MM among the transactions' dates — the month the statement actually covers. */
+function inferPeriod(transactions: BankTransaction[]): string | null {
+  const counts = new Map<string, number>();
+  for (const t of transactions) {
+    const m = t.date.slice(0, 7);
+    if (/^\d{4}-\d{2}$/.test(m)) counts.set(m, (counts.get(m) ?? 0) + 1);
+  }
+  let best: string | null = null;
+  let most = 0;
+  for (const [m, c] of counts) if (c > most) { best = m; most = c; }
+  return best;
+}
+
+/** Flip the given files to `paid` in a month's ledger, without recording bank rows (carry-over case). */
+function markDocsPaid(state: MonthState, files: Set<string>): MonthState {
+  if (files.size === 0) return state;
+  return { ...state, documents: state.documents.map((d) => (files.has(d.file) ? { ...d, paymentStatus: 'paid' } : d)) };
+}
+
 /**
- * Reconcile one bank statement against `month`'s unpaid invoices: read the ledger, dispatch the
- * `reconciler` (judgment) with the unpaid set, apply (mark paid + record txns) to state.md, then mark
- * the period reconciled + drop paid items from state.json. Mirrors runIntake; never throws on a Drive
- * miss. The statement file is already on local disk (downloaded by the reconcile worker).
+ * Reconcile one bank statement WITHOUT being told which month it is — the statement's own transaction
+ * dates decide. Loads the unpaid invoices from a two-month candidate window (THIS_MONTH + last month,
+ * the only realistic periods), hands the union to the `reconciler` (judgment), then applies its matches
+ * to the RIGHT month per matched invoice: bank rows are recorded in the statement's detected period;
+ * an invoice is marked paid in whichever month it lives (so a statement paying a prior-month straggler
+ * settles it there). state.json `export_status` is set `reconciled` for every touched month. Never
+ * assumes prevMonth; never throws on a Drive miss. The file is already on local disk.
  */
 export async function runReconcile(
   db: Db,
-  month: string,
   statement: { filePath: string; filename: string },
-  deps: { dispatch?: DispatchOptions; filing?: FilingDeps; financeState?: DriveStateDeps } = {},
+  deps: { dispatch?: DispatchOptions; filing?: FilingDeps; financeState?: DriveStateDeps; today?: string } = {},
 ): Promise<ReconcileResult> {
   const run = deps.filing?.run ?? defaultGwsRunner;
   const download = deps.filing?.download ?? makeDriveDownloader(run);
   const rootId = (deps.filing?.rootFolderId ?? readDriveRootFolderId)();
   if (!rootId) return { status: 'failed', detail: 'no drive root folder id', matched: 0 };
-  const monthId = findChildId(rootId, month, DRIVE_FOLDER_MIME, run);
-  if (!monthId) return { status: 'failed', detail: `month folder ${month} not found`, matched: 0 };
-  const doppId = findChildId(monthId, '.doppelganger', DRIVE_FOLDER_MIME, run);
-  if (!doppId) return { status: 'failed', detail: 'no .doppelganger folder', matched: 0 };
-  const ref = resolveStateFile(doppId, run);
-  if (!ref) return { status: 'failed', detail: `no state.md for ${month}`, matched: 0 };
-  const state = parseStateMd(download(ref.fileId));
-  if (state.month === '') return { status: 'failed', detail: 'state.md unreadable', matched: 0 };
 
-  const unpaid = state.documents.filter(
-    (d) => (d.type === 'leverantörsfaktura' || d.type === 'skattekonto') && (d.paymentStatus === 'unpaid' || d.paymentStatus === 'overdue'),
-  );
-  const invoices = unpaid.map((d) => ({
-    file: d.file, supplier: d.supplier, amount: d.amount, ocr_number: d.ocrNumber, due_date: d.dueDate, type: d.type,
-  }));
+  const today = deps.today ?? operatorToday();
+  const candidates = [today.slice(0, 7), prevMonth(today)]; // THIS_MONTH + last month
+  const ctx = new Map<string, { state: MonthState; doppId: string; ref: ReturnType<typeof resolveStateFile> }>();
+  const fileMonth = new Map<string, string>();
+  const invoices: Array<{ file: string; supplier: string; amount: string; ocr_number: string; due_date: string; type: string }> = [];
+  for (const m of candidates) {
+    const monthId = findChildId(rootId, m, DRIVE_FOLDER_MIME, run);
+    if (!monthId) continue;
+    const doppId = findChildId(monthId, '.doppelganger', DRIVE_FOLDER_MIME, run);
+    if (!doppId) continue;
+    const ref = resolveStateFile(doppId, run);
+    if (!ref) continue;
+    const state = parseStateMd(download(ref.fileId));
+    if (state.month === '') continue;
+    ctx.set(m, { state, doppId, ref });
+    for (const d of state.documents) {
+      if ((d.type === 'leverantörsfaktura' || d.type === 'skattekonto') && (d.paymentStatus === 'unpaid' || d.paymentStatus === 'overdue')) {
+        invoices.push({ file: d.file, supplier: d.supplier, amount: d.amount, ocr_number: d.ocrNumber, due_date: d.dueDate, type: d.type });
+        fileMonth.set(d.file, m);
+      }
+    }
+  }
+  if (ctx.size === 0) return { status: 'failed', detail: 'no open month with a state.md', matched: 0 };
 
   const r = await dispatchAndAwait(
     db,
@@ -328,23 +361,46 @@ export async function runReconcile(
   if (r.state !== 'done' || (r.status !== 'success' && r.status !== 'flagged') || !r.result) {
     return { status: 'failed', detail: `reconciler ${r.state}/${r.status ?? '?'}`, matched: 0, runId: r.runId };
   }
+  const result = r.result as { transactions?: unknown; period?: unknown };
+  const transactions = normalizeTransactions(result.transactions);
 
-  const transactions = normalizeTransactions((r.result as { transactions?: unknown }).transactions);
-  const applied = applyReconciliation(state, transactions);
-  const w = writeMonthState(applied, doppId, ref, run);
-  if (!w.ok) return { status: 'failed', detail: `state write ${w.reason}`, matched: 0, runId: r.runId };
+  // The statement's period: trust the kernel's reading, else infer from the txn dates, else newest candidate.
+  const reported = typeof result.period === 'string' && /^\d{4}-\d{2}$/.test(result.period) ? result.period : null;
+  const period = reported ?? inferPeriod(transactions) ?? candidates.find((m) => ctx.has(m)) ?? candidates[0];
 
-  const paidFiles = new Set(
-    transactions.filter((t) => (t.matchConfidence === 'exact' || t.matchConfidence === 'fuzzy') && t.matchedToFile).map((t) => t.matchedToFile),
-  );
-  const paidDocs = unpaid.filter((d) => paidFiles.has(d.file)).map((d) => ({ supplier: d.supplier, amount: d.amount, dueDate: d.dueDate }));
-  const fs = readFinanceStateFromDrive(deps.financeState) ?? { version: 2, periods: {} };
-  writeFinanceStateToDrive(markReconciled(fs, month, paidDocs), deps.financeState);
+  // Group settled matches by the month their invoice lives in.
+  const paidByMonth = new Map<string, Set<string>>();
+  for (const t of transactions) {
+    if (!SETTLED_CONFIDENCE.has(t.matchConfidence) || !t.matchedToFile) continue;
+    const m = fileMonth.get(t.matchedToFile);
+    if (!m) continue;
+    let set = paidByMonth.get(m);
+    if (!set) { set = new Set<string>(); paidByMonth.set(m, set); }
+    set.add(t.matchedToFile);
+  }
 
-  const matched = paidFiles.size;
+  const touched = new Set<string>([...paidByMonth.keys()]);
+  if (ctx.has(period)) touched.add(period); // record the statement even if it matched nothing
+
+  let fs = readFinanceStateFromDrive(deps.financeState) ?? { version: 2, periods: {} };
+  let matched = 0;
+  for (const m of touched) {
+    const c = ctx.get(m);
+    if (!c) continue;
+    const paidFiles = paidByMonth.get(m) ?? new Set<string>();
+    // The statement's own period gets the bank rows + paid marks; carry-over months get paid marks only.
+    const newState = m === period ? applyReconciliation(c.state, transactions) : markDocsPaid(c.state, paidFiles);
+    const w = writeMonthState(newState, c.doppId, c.ref, run);
+    if (!w.ok) return { status: 'failed', detail: `state write ${m} ${w.reason}`, matched: 0, runId: r.runId };
+    matched += paidFiles.size;
+    const paidDocs = c.state.documents.filter((d) => paidFiles.has(d.file)).map((d) => ({ supplier: d.supplier, amount: d.amount, dueDate: d.dueDate }));
+    fs = markReconciled(fs, m, paidDocs);
+  }
+  writeFinanceStateToDrive(fs, deps.financeState);
+
   return {
     status: matched > 0 ? 'reconciled' : 'no-matches',
-    detail: `${month}: matched ${matched}/${unpaid.length} invoices across ${transactions.length} txns`,
+    detail: `${period}: matched ${matched} invoice(s) across ${transactions.length} txns${touched.size > 1 ? ` (${touched.size} months)` : ''}`,
     matched,
     runId: r.runId,
   };
