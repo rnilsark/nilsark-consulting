@@ -210,7 +210,7 @@ export function ingestInbox(db: Db, allowlist: string[] = [], list: GmailList = 
   if (cursor === null) {
     // First poll ever: prime the watermark to "now" and enqueue NOTHING. Never replay the inbox
     // history — everything predating the inbox path going live is already owned by the daily backstop
-    // run. Mirrors the whatsapp/imessage channels, whose watermark also starts at "now".
+    // sweep (sweepFinanceInbox). Mirrors the whatsapp/imessage channels, whose watermark also starts at "now".
     setChannelCursor(db, INBOX_CURSOR_KEY, String(Date.now()));
     console.log('[inbox-ingest] first poll — watermark primed to now, no history replayed');
     return;

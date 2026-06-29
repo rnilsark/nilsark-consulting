@@ -3,7 +3,7 @@ import { enqueue, jobs } from './adapters/schedule.ts';
 import { runHealthcheck } from './adapters/health.ts';
 import { ingestChat } from './adapters/chat.ts';
 import { maybeEnqueueFinanceRun, operatorToday, shadowValidateMonth } from './adapters/finance.ts';
-import { bankStatementNudge, pollBankDrop } from './adapters/finance-intake.ts';
+import { bankStatementNudge, pollBankDrop, sweepFinanceInbox } from './adapters/finance-intake.ts';
 import { ingestInbox } from './adapters/inbox.ts';
 import { config } from './config.ts';
 import type { Db } from './db.ts';
@@ -34,6 +34,12 @@ export function startScheduler(db: Db, channels: Map<string, Channel>): void {
 
   cron.schedule(config.financeHeartbeatCron, () => {
     try {
+      try {
+        const s = sweepFinanceInbox(db); // daily collect backstop: enqueue inbox rows for any mail the cursor poll missed
+        if (s.enqueued > 0) console.log(`[intake-sweep] ${s.enqueued} message(s) → inbox`);
+      } catch (err) {
+        console.error('[intake-sweep] failed:', err);
+      }
       maybeEnqueueFinanceRun(db); // gated enqueue — see finance.ts
       try {
         // step 2 shadow check (read-only): prove the TS ledger round-trips the live book

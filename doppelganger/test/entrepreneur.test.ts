@@ -13,10 +13,19 @@ test('registry: entrepreneur may draft but never bare-send, and has no broad Bas
   assert.ok(!tools.includes('Bash'), 'no standalone broad Bash');
 });
 
-test('registry: entrepreneur is reachable from the heartbeat cron, from chat, and from the inbox gate', () => {
+test('registry: entrepreneur is reachable from the heartbeat cron and from chat, NOT from the inbox gate', () => {
   const registry = loadRegistry();
-  assert.deepEqual(registry.agents.entrepreneur.can_be_called_by, ['schedule', 'chat', 'inbox']);
+  // The event-driven intake/reconcile path no longer reaches the credentialed entrepreneur — the inbox
+  // gate routes to the scoped TS orchestrators. Only the schedule or a verified operator can start it.
+  assert.deepEqual(registry.agents.entrepreneur.can_be_called_by, ['schedule', 'chat']);
   assert.equal(registry.agents['inbox-triage'], undefined, 'inbox-triage removed');
+});
+
+test('registry: the inbox gate can order the scoped TS orchestrators, not the credentialed entrepreneur', () => {
+  const registry = loadRegistry();
+  assert.deepEqual(registry.agents.intake.can_be_called_by, ['inbox']);
+  assert.deepEqual(registry.agents.reconcile.can_be_called_by, ['inbox']);
+  assert.ok(!registry.agents.entrepreneur.can_be_called_by.includes('inbox'), 'inbox cannot reach entrepreneur');
 });
 
 test('registry: inbox is an untrusted-text gate — only the inbox-ingest adapter may call it, no domain tools', () => {

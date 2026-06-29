@@ -38,19 +38,23 @@ agents:
 
   # The entrepreneur: the credentialed finance worker. Self-contained — its finance logic lives in
   # its own local .claude/skills (vendored; no reach into the nilsark plugin or any repo path), and
-  # its config comes from its injected `## Settings` (no config-file reads). Does the autonomous-safe
-  # finance run: collect/classify/upload, bank matching, payment refresh, anomaly scan, month-close
-  # DRAFTS, and the todo. Reachable from the schedule (the heartbeat cron fires the `run` task), from
-  # chat (a verified person can ask for a run), and from inbox (event-driven intake). It reads
+  # its config comes from its injected `## Settings` (no config-file reads). Does the JUDGMENT half of
+  # the finance run — payment-status refresh, anomaly scan, month-close DRAFTS, and the todo/push. It
+  # no longer collects or classifies: the TS `intake`/`reconcile` orchestrators keep `state.md`
+  # current and it reads that ledger. Reachable from the schedule (the heartbeat cron fires the `run` task) and
+  # from chat (a verified person can ask for a run). The event-driven intake/reconcile path no longer
+  # reaches it — the `inbox` gate routes to the scoped TS `intake`/`reconcile` orchestrators instead,
+  # so this credentialed agent is only ever started by the schedule or a verified operator. It reads
   # untrusted email/attachments, so the grant is deliberately narrow:
   #   - Gmail: read (`users:*`) + DRAFT form only — no bare `+send`, so it can't transmit email.
   #   - Drive: only get/list/update/+upload — NO `files delete` (can't destroy records) and NO
   #     `permissions` (can't share a file out to exfiltrate). Pair with a `drive.file`-scoped token.
-  #   - NO `python3`/`node -c` arbitrary exec: the one base64 decode uses jq + basenc instead.
+  #   - NO `python3`/`node -c` arbitrary exec. No attachment download/decode anymore (collection moved
+  #     to the TS path), so the old `basenc` base64 grant is gone too.
   #   - Never pays / never does BankID (no tools for either).
   entrepreneur:
-    can_be_called_by: [schedule, chat, inbox]
-    tools: "Bash(gws gmail users:*),Bash(gws gmail +send --draft:*),Bash(gws drive files get:*),Bash(gws drive files list:*),Bash(gws drive files update:*),Bash(gws drive +upload:*),Bash(date:*),Bash(jq:*),Bash(basenc:*),Bash(mkdir:*),Bash(mv:*),Bash(cd:*),Read,Write,Edit,Skill"
+    can_be_called_by: [schedule, chat]
+    tools: "Bash(gws gmail users:*),Bash(gws gmail +send --draft:*),Bash(gws drive files get:*),Bash(gws drive files list:*),Bash(gws drive files update:*),Bash(gws drive +upload:*),Bash(date:*),Bash(jq:*),Bash(mkdir:*),Bash(mv:*),Bash(cd:*),Read,Write,Edit,Skill"
     model: sonnet
     max_concurrency: 1
 
