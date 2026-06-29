@@ -121,3 +121,91 @@ test('scanAnomalies: same supplier+amount twice → both flagged as duplicates',
   const dups = scanAnomalies(state, new Set(['Fortnox'])).filter((f) => f.flag.includes('dubblett'));
   assert.deepEqual(dups.map((f) => f.file).sort(), ['x1.pdf', 'x2.pdf']);
 });
+
+// ---- payUrgency / composeTodo / composePush ---------------------------------
+
+import { composePush, composeTodo, payUrgency, planFinanceRollup, type PeriodPlan } from '../src/adapters/finance-rollup.ts';
+import { emptyMonthState, renderStateMd, type GwsRunner, type GwsResult } from '../src/adapters/state.ts';
+
+test('payUrgency: overdue/≤2d → URGENT, ≤7d → SOON, else SCHEDULED', () => {
+  assert.equal(payUrgency('2026-06-10', '2026-06-15'), 'URGENT');  // overdue
+  assert.equal(payUrgency('2026-06-16', '2026-06-15'), 'URGENT');  // ≤2d
+  assert.equal(payUrgency('2026-06-20', '2026-06-15'), 'SOON');    // ≤7d
+  assert.equal(payUrgency('2026-07-30', '2026-06-15'), 'SCHEDULED');
+});
+
+function plan(p: Partial<PeriodPlan>): PeriodPlan {
+  return { month: '2026-06', pay: [], anomalies: [], exportNeeded: false, approve: null, waiting: null, storedFingerprint: null, freshFingerprint: null, ...p };
+}
+
+test('composeTodo: groups by month with PAY (urgency-sorted), EXPORT, GODKÄNN, VÄNTAR', () => {
+  const todo = composeTodo([
+    plan({ month: '2026-05', exportNeeded: true, waiting: '2026-05: väntar på kontoutdrag' }),
+    plan({
+      month: '2026-06',
+      pay: [doc({ supplier: 'Telia', amount: '1250', dueDate: '2026-06-25' }), doc({ supplier: 'Fortnox', amount: '450', dueDate: '2026-06-10' })],
+      approve: { drafts: 6 },
+      anomalies: [{ file: 'x', flag: '⚠ ny leverantör' }],
+    }),
+  ], '2026-06-15');
+  assert.ok(todo.includes('## Ekonomi 2026-05'));
+  assert.ok(todo.includes('EXPORTERA: kontoutdrag för 2026-05'));
+  assert.ok(todo.includes('VÄNTAR: 2026-05'));
+  assert.ok(todo.includes('GODKÄNN: 6 bokföringsutkast (⚠ ny leverantör)'));
+  // Fortnox is overdue (URGENT) → must sort before Telia (SOON).
+  assert.ok(todo.indexOf('Fortnox') < todo.indexOf('Telia'), 'urgent pay item first');
+});
+
+test('composePush: null when no fingerprint changed; summarizes only changed periods', () => {
+  assert.equal(composePush([plan({ storedFingerprint: 'a', freshFingerprint: 'a' })], '2026-06-15'), null);
+  const push = composePush([
+    plan({ month: '2026-06', storedFingerprint: 'a', freshFingerprint: 'b', pay: [doc({ supplier: 'Fortnox', amount: '450', dueDate: '2026-06-10' })] }),
+  ], '2026-06-15');
+  assert.ok(push?.includes('Ekonomi 2026-06'));
+  assert.ok(push?.includes('Fortnox 450 kr'));
+  assert.ok(push?.includes('brådskande')); // overdue → urgent marker
+});
+
+// ---- planFinanceRollup (read-only orchestrator, mocked Drive) ---------------
+
+const okR = (stdout: string): GwsResult => ({ ok: true, stdout, detail: '' });
+
+test('planFinanceRollup: reads this month, builds the PAY set + a changed fingerprint, writes nothing', () => {
+  // One open current month with a single unpaid invoice, and no stored fingerprint → push fires.
+  const stateMd = renderStateMd({
+    ...emptyMonthState('2026-06'),
+    documents: [doc({ file: 'inv.pdf', supplier: 'Fortnox', amount: '450', dueDate: '2026-06-20', paymentStatus: 'unpaid' })],
+  });
+  let wrote = false;
+  const run: GwsRunner = (args) => {
+    const p = args[args.indexOf('--params') + 1] ?? '';
+    if (args[2] === 'list') {
+      if (p.includes("name='2026-06'")) return okR(JSON.stringify({ files: [{ id: 'M6' }] }));
+      if (p.includes("name='2026-0'") || p.includes("name='2026-04'") || p.includes("name='2026-05'")) return okR(JSON.stringify({ files: [] }));
+      if (p.includes('.doppelganger')) return okR(JSON.stringify({ files: [{ id: 'DOPP' }] }));
+      if (p.includes('state.md')) return okR(JSON.stringify({ files: [{ id: 'SM', headRevisionId: 'R1' }] }));
+      return okR(JSON.stringify({ files: [] }));
+    }
+    if (args[2] === 'update' || args[1] === '+upload') { wrote = true; return okR('{}'); }
+    throw new Error(`unexpected: ${args.join(' ')}`);
+  };
+  const r = planFinanceRollup({
+    today: '2026-06-15',
+    run,
+    download: () => stateMd,
+    rootFolderId: () => 'ROOT',
+    financeState: { run, download: () => JSON.stringify({ version: 2, periods: {} }), rootFolderId: () => 'ROOT' },
+  });
+  assert.equal(wrote, false, 'planFinanceRollup is read-only');
+  assert.equal(r.periods.length, 1);
+  assert.equal(r.periods[0].pay.length, 1);
+  assert.notEqual(r.periods[0].freshFingerprint, r.periods[0].storedFingerprint); // null stored → changed
+  assert.ok(r.push?.includes('Fortnox'));
+  assert.deepEqual(Object.keys(r.notify['2026-06'].items), ['Fortnox|450|2026-06-20']);
+});
+
+test('planFinanceRollup: no drive root → empty plan, no throw', () => {
+  const r = planFinanceRollup({ today: '2026-06-15', rootFolderId: () => null });
+  assert.equal(r.periods.length, 0);
+  assert.equal(r.push, null);
+});

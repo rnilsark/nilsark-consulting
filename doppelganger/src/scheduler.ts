@@ -4,6 +4,7 @@ import { runHealthcheck } from './adapters/health.ts';
 import { ingestChat } from './adapters/chat.ts';
 import { maybeEnqueueFinanceRun, operatorToday, shadowValidateMonth } from './adapters/finance.ts';
 import { bankStatementNudge, pollBankDrop, sweepFinanceInbox } from './adapters/finance-intake.ts';
+import { planFinanceRollup } from './adapters/finance-rollup.ts';
 import { ingestInbox } from './adapters/inbox.ts';
 import { config } from './config.ts';
 import type { Db } from './db.ts';
@@ -47,6 +48,15 @@ export function startScheduler(db: Db, channels: Map<string, Channel>): void {
         console.log(`[state-shadow] ${r.month} found=${r.found} clean=${r.clean} — ${r.detail}`);
       } catch (err) {
         console.error('[state-shadow] failed:', err);
+      }
+      try {
+        // dissolve-entrepreneur shadow (read-only): log what the TS rollup WOULD push/persist, so it
+        // can be diffed against the live entrepreneur run before the cron is cut over to it.
+        const plan = planFinanceRollup();
+        const fps = plan.periods.map((p) => `${p.month}:${p.storedFingerprint ?? '∅'}→${p.freshFingerprint ?? '∅'}`).join(' ');
+        console.log(`[rollup-shadow] ${plan.detail} [${fps}] push=${plan.push ? 'yes' : 'no'}`);
+      } catch (err) {
+        console.error('[rollup-shadow] failed:', err);
       }
       try {
         const n = bankStatementNudge(db); // early-month: ask for last month's statement if unreconciled
