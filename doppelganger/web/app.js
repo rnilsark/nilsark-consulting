@@ -52,46 +52,40 @@ function hash01(s) {
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
-// Domain clusters: each agent orbits its domain's sector, so the constellation reads as sub-systems
-// (a finance sub-constellation, a calendar one, the intake door) rather than one undifferentiated
-// ring. The finance list already names the agents the entrepreneur is being split into — they slot
-// into the finance cluster automatically as they get registered + dispatched.
-const CLUSTERS = [
-  { name: 'finance', base: -55, members: ['entrepreneur', 'inbox', 'classifier', 'reconciler', 'summarizer'] },
-  { name: 'calendar', base: 70, members: ['planner'] },
-  { name: 'intake', base: 180, members: ['triage', 'chat'] },
-];
+// Domain star-formations: each domain (cluster) hangs off CORE through a HUB (an orchestrator-star),
+// and its agents fan out on the far side of the hub — so the constellation reads as sub-systems, not
+// one flat ring. CORE → hub → agents is the structural skeleton; observed runtime delegations animate
+// on top of it.
+const DOMAIN_BASE = { finance: -52, calendar: 64, comms: 168 }; // degrees from CORE
 const OTHER_BASE = 250;
-function domainOf(name) {
-  const c = CLUSTERS.find((c) => c.members.includes(name));
-  return c ? c.name : 'other';
-}
+const hubId = (domain) => 'hub:' + domain;
+const hubLabel = (domain) => domain.toUpperCase();
 
-/** CORE at center; agents fanned within their domain's angular sector (deterministic per-name jitter). */
-function layout(names) {
+/** CORE center → a hub per cluster → members fanned outward from the hub. Deterministic per-name jitter. */
+function layout(agents, clusters) {
   const pos = { [CORE]: { x: 50, y: 53 } };
-  const groups = new Map();
-  for (const name of names) {
-    const d = domainOf(name);
-    if (!groups.has(d)) groups.set(d, []);
-    groups.get(d).push(name);
-  }
-  for (const [domain, members] of groups) {
-    members.sort();
-    const base = CLUSTERS.find((c) => c.name === domain)?.base ?? OTHER_BASE;
-    const spread = Math.min(70, 16 + members.length * 12); // wider arc as a cluster grows
+  const grouped = new Set();
+  for (const cl of clusters) {
+    const base = DOMAIN_BASE[cl.name] ?? OTHER_BASE;
+    const a = (base * Math.PI) / 180;
+    const hx = clamp(50 + Math.cos(a) * 21, 18, 82);
+    const hy = clamp(51 + Math.sin(a) * 19, 20, 78);
+    pos[hubId(cl.name)] = { x: hx, y: hy };
+    const members = [...cl.members].sort();
+    const spread = Math.min(150, 50 + members.length * 16);
     members.forEach((name, i) => {
+      grouped.add(name);
       const frac = members.length === 1 ? 0.5 : i / (members.length - 1);
-      const angle = ((base + (frac - 0.5) * spread + (hash01(name) - 0.5) * 8) * Math.PI) / 180;
-      const j = hash01(name + '#');
-      const rx = 30 + (j - 0.5) * 8;
-      const ry = 27 + (j - 0.5) * 6;
-      pos[name] = {
-        x: clamp(50 + Math.cos(angle) * rx, 12, 88),
-        y: clamp(51 + Math.sin(angle) * ry, 16, 80),
-      };
+      const ma = ((base + (frac - 0.5) * spread + (hash01(name) - 0.5) * 10) * Math.PI) / 180; // fan outward from CORE
+      const r = 10 + hash01(name + '#') * 5;
+      pos[name] = { x: clamp(hx + Math.cos(ma) * r, 9, 91), y: clamp(hy + Math.sin(ma) * r * 0.92, 13, 84) };
     });
   }
+  // Agents in no cluster: spread on the remaining arc around CORE.
+  agents.filter((ag) => !grouped.has(ag.name)).forEach((ag, i) => {
+    const angle = ((OTHER_BASE + i * 42) * Math.PI) / 180;
+    pos[ag.name] = { x: clamp(50 + Math.cos(angle) * 30, 12, 88), y: clamp(51 + Math.sin(angle) * 27, 16, 80) };
+  });
   return pos;
 }
 
@@ -131,9 +125,12 @@ function nodeStyles(name, agent, pos, selected) {
   const status = isCore ? null : agent.status;
   const v = nodeVisual(isCore, status);
   const active = isCore || status === 'running';
+  const orch = !isCore && agent?.kind === 'orchestrator'; // a TS coordinator within a domain — mark it like a mini-hub
   const haloTop = 10 + v.rayLen / 2;
   const haloSize = isCore ? 96 : 76;
-  const selRing = selected ? 'box-shadow:0 0 0 1px rgba(45,255,163,.45), 0 0 16px rgba(45,255,163,.22);' : '';
+  const selRing = selected
+    ? 'box-shadow:0 0 0 1px rgba(45,255,163,.45), 0 0 16px rgba(45,255,163,.22);'
+    : orch ? `box-shadow:0 0 0 1px ${HUB_COL_DIM};` : '';
 
   let statusText = '';
   let statusStyle = 'display:none;';
@@ -152,7 +149,7 @@ function nodeStyles(name, agent, pos, selected) {
     rayH: `position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:${v.rayLen}px;height:1.5px;background:linear-gradient(90deg,transparent,${v.col} 50%,transparent);opacity:${v.rayOp};box-shadow:0 0 6px ${v.glow};`,
     rayV: `position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:1.5px;height:${v.rayLen}px;background:linear-gradient(180deg,transparent,${v.col} 50%,transparent);opacity:${v.rayOp};box-shadow:0 0 6px ${v.glow};`,
     core: `position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:${v.coreSize}px;height:${v.coreSize}px;border-radius:50%;background:${v.col};box-shadow:${v.coreGlow};`,
-    label: `font-size:${isCore ? 11 : 10}px;font-weight:${isCore ? 700 : 500};letter-spacing:${isCore ? 4 : 2.5}px;color:${active ? ACCENT : 'rgba(150,210,180,.6)'};`,
+    label: `font-size:${isCore ? 11 : 10}px;font-weight:${isCore ? 700 : 500};letter-spacing:${isCore ? 4 : 2.5}px;color:${active ? ACCENT : orch ? HUB_COL_DIM : 'rgba(150,210,180,.6)'};`,
     statusText, statusStyle,
   };
 }
@@ -266,6 +263,79 @@ function renderPackets(positions, edges) {
   });
   for (const [key, dot] of packetEls) {
     if (!wanted.has(key)) { dot.remove(); packetEls.delete(key); }
+  }
+}
+
+// ---- domain hubs + structural skeleton --------------------------------------
+// A hub is the synthetic anchor a domain's agents orbit; CORE→hub→members is the formation skeleton
+// (faint, dashed), drawn behind the bright runtime-activity edges. Hubs are cyan to read apart from
+// the green agent stars.
+const HUB_COL = 'rgba(90,200,255,.7)';
+const HUB_COL_DIM = 'rgba(90,200,255,.55)';
+const SVGNS = 'http://www.w3.org/2000/svg';
+
+const hubEls = new Map(); // domain -> { el, mark, label }
+
+function renderHubs(positions, clusters) {
+  const container = $('nodes');
+  const wanted = new Set(clusters.map((c) => hubId(c.name)));
+  for (const [id, entry] of hubEls) {
+    if (!wanted.has(id)) { entry.el.remove(); hubEls.delete(id); }
+  }
+  for (const cl of clusters) {
+    const id = hubId(cl.name);
+    const p = positions[id];
+    if (!p) continue;
+    let entry = hubEls.get(id);
+    if (!entry) {
+      const el = document.createElement('div');
+      const mark = document.createElement('div');
+      const label = document.createElement('div');
+      el.append(mark, label);
+      label.textContent = hubLabel(cl.name);
+      container.appendChild(el);
+      entry = { el, mark, label };
+      hubEls.set(id, entry);
+    }
+    entry.el.style.cssText = `position:absolute;left:${p.x}%;top:${p.y}%;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:6px;z-index:1;pointer-events:none;`;
+    entry.mark.style.cssText = `width:14px;height:14px;border-radius:50%;border:1px solid ${HUB_COL};background:radial-gradient(circle,rgba(90,200,255,.45),rgba(90,200,255,0) 70%);box-shadow:0 0 9px rgba(90,200,255,.3);`;
+    entry.label.style.cssText = 'font-size:8px;font-weight:600;letter-spacing:3px;color:rgba(90,200,255,.6);';
+  }
+}
+
+const structEls = new Map(); // key -> line element (CORE→hub, hub→member)
+
+function renderStructure(positions, clusters) {
+  const svg = $('edges');
+  const wanted = new Set();
+  const add = (from, to, fromCore) => {
+    const pf = positions[from];
+    const pt = positions[to];
+    if (!pf || !pt) return;
+    const key = `s:${from}→${to}`;
+    wanted.add(key);
+    let line = structEls.get(key);
+    if (!line) {
+      line = document.createElementNS(SVGNS, 'line');
+      line.setAttribute('stroke', HUB_COL);
+      line.setAttribute('stroke-linecap', 'round');
+      line.setAttribute('stroke-dasharray', '0.6 1.6');
+      line.setAttribute('vector-effect', 'non-scaling-stroke');
+      svg.insertBefore(line, svg.firstChild); // behind the activity edges
+      structEls.set(key, line);
+    }
+    line.setAttribute('x1', pf.x); line.setAttribute('y1', pf.y);
+    line.setAttribute('x2', pt.x); line.setAttribute('y2', pt.y);
+    line.setAttribute('stroke-width', fromCore ? 0.7 : 0.5);
+    line.setAttribute('opacity', fromCore ? 0.3 : 0.16);
+  };
+  for (const cl of clusters) {
+    const h = hubId(cl.name);
+    add(CORE, h, true);
+    for (const m of cl.members) add(h, m, false);
+  }
+  for (const [key, line] of structEls) {
+    if (!wanted.has(key)) { line.remove(); structEls.delete(key); }
   }
 }
 
@@ -409,12 +479,19 @@ function render() {
   if (!state.data) return;
   const data = state.data;
   if (state.selected && !data.agents.some((a) => a.name === state.selected)) state.selected = null;
-  const positions = layout(data.agents.map((a) => a.name));
+  const clusters = data.clusters ?? [];
+  const positions = layout(data.agents, clusters);
+  // CORE→member idle spokes are replaced by the structural skeleton (CORE→hub→member); keep only the
+  // active ones plus all agent→agent and CORE→ungrouped edges.
+  const clustered = new Set(clusters.flatMap((c) => c.members));
+  const edges = data.edges.filter((e) => e.active || !(e.from === CORE && clustered.has(e.to)));
   renderStats(data.stats);
   renderVersion(data.version);
+  renderStructure(positions, clusters);
+  renderHubs(positions, clusters);
   renderNodes(positions, data.agents);
-  renderEdges(positions, data.edges);
-  renderPackets(positions, data.edges);
+  renderEdges(positions, edges);
+  renderPackets(positions, edges);
   renderDrawer(data);
 }
 

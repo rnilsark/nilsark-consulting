@@ -12,8 +12,25 @@ export type NodeStatus = 'running' | 'done' | 'flagged' | 'error' | 'idle';
 /** The constellation's center node: the runtime/orchestrator that lays top-level orders. */
 export const CORE = 'core';
 
+export type NodeKind = 'judgment' | 'orchestrator';
+
+/** Which agents are deterministic TS orchestrators (hubs), not LLM judgment stars. Mirrors registry.yaml `kind`. */
+const ORCHESTRATORS = new Set(['intake', 'reconcile']);
+
+/** Domain groupings — the structural "star formations". Each becomes a cluster tethered to CORE via a hub. */
+export const DOMAINS: Array<{ name: string; members: string[] }> = [
+  { name: 'finance', members: ['inbox', 'intake', 'classifier', 'reconcile', 'reconciler', 'entrepreneur'] },
+  { name: 'calendar', members: ['planner'] },
+  { name: 'comms', members: ['triage', 'chat'] },
+];
+const domainOf = (name: string): string | null => DOMAINS.find((d) => d.members.includes(name))?.name ?? null;
+
 export interface AgentState {
   name: string;
+  /** `judgment` = LLM star; `orchestrator` = deterministic TS hub. */
+  kind: NodeKind;
+  /** Domain this agent belongs to (the star formation it orbits), or null if ungrouped. */
+  cluster: string | null;
   status: NodeStatus;
   running: boolean;
   task: string;
@@ -50,6 +67,8 @@ export interface DashboardState {
   edges: EdgeState[];
   stats: { runs: number; cost: number; active: number };
   feed: FeedRow[];
+  /** Domain star-formations (only those with a present member), for the FE to cluster around a hub. */
+  clusters: Array<{ name: string; members: string[] }>;
 }
 
 /** Inclusive lower bound (ISO) for a window; events store ISO UTC so string compare works. */
@@ -123,6 +142,8 @@ export function project(
 
     return {
       name,
+      kind: ORCHESTRATORS.has(name) ? ('orchestrator' as const) : ('judgment' as const),
+      cluster: domainOf(name),
       status,
       running,
       task: liveRun?.started?.task ?? last?.task ?? '—',
@@ -181,5 +202,8 @@ export function project(
       delegated: ev.kind === 'started' && ev.parent != null,
     }));
 
-  return { agents, edges: [...edgeMap.values()], stats, feed };
+  const present = new Set(names);
+  const clusters = DOMAINS.map((d) => ({ name: d.name, members: d.members.filter((m) => present.has(m)) })).filter((c) => c.members.length > 0);
+
+  return { agents, edges: [...edgeMap.values()], stats, feed, clusters };
 }

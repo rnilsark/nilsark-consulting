@@ -8,7 +8,7 @@ export const agentsDir = path.join(rootDir, 'agents');
 
 export function loadRegistry(filePath = path.join(rootDir, 'registry.yaml')): Registry {
   const raw = parse(readFileSync(filePath, 'utf8')) as {
-    agents?: Record<string, { can_be_called_by?: string[]; tools?: string; model?: string; max_concurrency?: number }>;
+    agents?: Record<string, { can_be_called_by?: string[]; tools?: string; model?: string; max_concurrency?: number; kind?: string }>;
   };
   const agents: Record<string, Agent> = {};
   for (const [name, def] of Object.entries(raw.agents ?? {})) {
@@ -18,6 +18,7 @@ export function loadRegistry(filePath = path.join(rootDir, 'registry.yaml')): Re
       tools: def.tools ?? '',
       model: def.model,
       max_concurrency: def.max_concurrency,
+      kind: def.kind === 'orchestrator' ? 'orchestrator' : 'judgment',
     };
   }
   return { agents };

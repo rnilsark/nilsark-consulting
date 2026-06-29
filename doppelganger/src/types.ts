@@ -31,6 +31,8 @@ export interface EventRow {
   summary: string | null;
 }
 
+export type AgentKind = 'judgment' | 'orchestrator';
+
 export interface Agent {
   name: string;
   can_be_called_by: string[];
@@ -40,6 +42,13 @@ export interface Agent {
   model?: string;
   /** Maximum number of concurrent runs for this agent. Omitted → unlimited. */
   max_concurrency?: number;
+  /**
+   * What kind of star this is. `judgment` = an LLM run that decides (the default). `orchestrator` = a
+   * deterministic TS coordinator the worker runs instead of claude (sequences a domain's flow). Drives
+   * how the constellation renders it: judgment = a star, orchestrator = a hub. Optional on the type
+   * (omitted ⇒ judgment); `loadRegistry` always fills it in.
+   */
+  kind?: AgentKind;
 }
 
 export interface Registry {

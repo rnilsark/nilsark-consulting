@@ -70,6 +70,7 @@ agents:
   intake:
     can_be_called_by: [inbox]
     tools: ""
+    kind: orchestrator
 
   # Second judgment kernel: match a bank statement against the month's unpaid invoices. Stateless —
   # given the statement file + the invoice list, return each transaction with its matched invoice +
@@ -86,3 +87,4 @@ agents:
   reconcile:
     can_be_called_by: [inbox]
     tools: ""
+    kind: orchestrator
