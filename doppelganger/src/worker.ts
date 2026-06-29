@@ -18,6 +18,7 @@ import { loadAgentContext, loadAgentSettings, loadSoul } from './settings.ts';
 import { downloadAttachment } from './adapters/inbox.ts';
 import { operatorToday, prevMonth } from './adapters/finance.ts';
 import { downloadDriveFileToPath, runIntake, runReconcile } from './adapters/finance-intake.ts';
+import { applyFinanceRollup } from './adapters/finance-rollup.ts';
 import type { Order, OutFile, QueueRow, Registry, Reply, RunStatus } from './types.ts';
 
 export interface Outcome {
@@ -382,6 +383,18 @@ async function runReconcileAgent(db: Db, row: QueueRow, runDir: string, outPath:
   return { status, summary, orders: [], cost: null };
 }
 
+/**
+ * The `finance` agent is TS, not an LLM: run the heartbeat rollup (overdue/notify/fingerprint/anomaly/
+ * todo/push + close the first ready month). Deterministic, so there's no claude run and no cost. Writes
+ * out.json so the run is recorded like any other.
+ */
+function runFinanceAgent(db: Db, outPath: string): Outcome {
+  const r = applyFinanceRollup(db);
+  const summary = `finance: ${r.detail}`;
+  writeFileSync(outPath, JSON.stringify({ status: 'success', summary }));
+  return { status: 'success', summary, orders: [], cost: null };
+}
+
 async function main(): Promise<void> {
   const queueId = Number(process.argv[2]);
   if (!Number.isInteger(queueId)) {
@@ -407,6 +420,8 @@ async function main(): Promise<void> {
     outcome = await runIntakeAgent(db, row, runDir, outPath); // TS orchestrator, not claude
   } else if (row.agent === 'reconcile') {
     outcome = await runReconcileAgent(db, row, runDir, outPath); // TS orchestrator, not claude
+  } else if (row.agent === 'finance') {
+    outcome = runFinanceAgent(db, outPath); // TS heartbeat rollup (the dissolved entrepreneur run)
   } else {
     acknowledgeChat(db, row); // sign of life BEFORE the slow LLM run; drains ahead of the reply
     const { cost, failure } = runClaude(row, buildPrompt(row, outPath, registry, db), registry, runDir);

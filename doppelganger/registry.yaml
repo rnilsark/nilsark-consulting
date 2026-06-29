@@ -92,3 +92,13 @@ agents:
     can_be_called_by: [inbox]
     tools: ""
     kind: orchestrator
+
+  # The finance heartbeat orchestrator (TS, not an LLM): the worker runs the rollup — mark overdue,
+  # recompute notify.items + the actionable-set fingerprint, scan anomalies, compose + push the todo,
+  # and close the first ready prior month as Gmail DRAFTS. This is the dissolved `entrepreneur` run:
+  # all of it is deterministic procedure, so there is no model/tools — the worker executes TS. Fired
+  # by the skip-gate (the heartbeat cron) and, for a forced month / ack, by chat.
+  finance:
+    can_be_called_by: [schedule, chat]
+    tools: ""
+    kind: orchestrator

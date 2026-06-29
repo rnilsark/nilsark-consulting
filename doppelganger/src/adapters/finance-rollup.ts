@@ -6,6 +6,11 @@
 // it instead of paying for an LLM. Pure functions over the parsed `MonthState` + `state.json`; Drive
 // I/O is the orchestrator's job (kept out of here so this stays trivially testable).
 
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { config } from '../config.ts';
+import { insertOutbox, operatorPushTarget, type Db } from '../db.ts';
 import {
   DRIVE_FOLDER_MIME,
   bucketFor,
@@ -13,21 +18,27 @@ import {
   findChildId,
   operatorToday,
   readDriveRootFolderId,
+  readFinanceSettings,
   readFinanceStateFromDrive,
+  writeFinanceStateToDrive,
   type DriveStateDeps,
+  type FinanceSettings,
   type FinanceState,
   type NotifyItem,
 } from './finance.ts';
 import { normalizeAmount } from './finance-intake.ts';
+import { runMonthClose } from './finance-close.ts';
 import {
   defaultGwsRunner,
   makeDriveDownloader,
   parseStateMd,
   resolveStateFile,
+  writeMonthState,
   type DriveDownloader,
   type GwsRunner,
   type LedgerDocument,
   type MonthState,
+  type StateFileRef,
 } from './state.ts';
 
 /** Types whose unpaid invoices the operator must pay (and which carry into the actionable/notify set). */
@@ -235,8 +246,34 @@ function addMonths(month: string, delta: number): string {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
-/** Read + parse a month's state.md, or null when the month hasn't been started / can't be read. */
-function readMonth(month: string, rootId: string, run: GwsRunner, download: DriveDownloader): MonthState | null {
+/** A gathered open period: the parsed ledger + the Drive refs needed to write it back. */
+interface GatheredPeriod {
+  month: string;
+  doppId: string;
+  ref: StateFileRef;
+  dated: MonthState; // after markOverdue
+  overdueChanged: boolean;
+  exportStatus: string | undefined;
+  plan: PeriodPlan;
+  items: Record<string, NotifyItem>;
+  fingerprint: string | null;
+}
+
+interface Gathered {
+  rootId: string;
+  fs: FinanceState;
+  today: string;
+  thisMonth: string;
+  periods: GatheredPeriod[];
+}
+
+/** Read + parse a month's state.md, keeping the Drive refs so the caller can write it back. */
+function readMonthRef(
+  month: string,
+  rootId: string,
+  run: GwsRunner,
+  download: DriveDownloader,
+): { doppId: string; ref: StateFileRef; state: MonthState } | null {
   const monthId = findChildId(rootId, month, DRIVE_FOLDER_MIME, run);
   if (!monthId) return null;
   const doppId = findChildId(monthId, '.doppelganger', DRIVE_FOLDER_MIME, run);
@@ -244,69 +281,142 @@ function readMonth(month: string, rootId: string, run: GwsRunner, download: Driv
   const ref = resolveStateFile(doppId, run);
   if (!ref) return null;
   const state = parseStateMd(download(ref.fileId));
-  return state.month === '' ? null : state;
+  return state.month === '' ? null : { doppId, ref, state };
 }
 
 /**
- * Compute the heartbeat rollup for every open period WITHOUT writing anything — the read-only plan the
- * live run will later apply. Open periods = THIS_MONTH plus the two prior months whose state.md exists
- * and is still open (`Month-close sent: no`). Per period: mark overdue (in-memory), build the PAY set,
- * recompute notify.items + fingerprint (carrying acks from `state.json`), scan anomalies, and decide
- * export/approve/waiting. Then compose the todo + (changed-only) push. Best-effort: a Drive miss yields
- * an empty plan, never throws. This is what the shadow logs and what slice 3 will turn into writes.
+ * The shared read+compute both `planFinanceRollup` (read-only) and `applyFinanceRollup` (read-write)
+ * build on, so the plan and the writes can never diverge. Open periods = THIS_MONTH plus the two prior
+ * months whose state.md exists and is still open (`Month-close sent: no`). Per period: mark overdue
+ * (in-memory), build the PAY set, recompute notify.items + fingerprint (carrying acks from state.json),
+ * scan anomalies, decide export/approve/waiting. Returns null when there's no Drive root.
  */
-export function planFinanceRollup(deps: RollupDeps = {}): RollupPlan {
+function gatherRollup(deps: RollupDeps): Gathered | null {
   const run = deps.run ?? defaultGwsRunner;
   const download = deps.download ?? makeDriveDownloader(run);
   const today = deps.today ?? operatorToday();
   const thisMonth = today.slice(0, 7);
   const rootId = (deps.rootFolderId ?? readDriveRootFolderId)();
-  const empty: RollupPlan = { periods: [], notify: {}, todo: composeTodo([], today), push: null, detail: 'no drive root folder id' };
-  if (!rootId) return empty;
+  if (!rootId) return null;
 
   const fs: FinanceState = readFinanceStateFromDrive(deps.financeState) ?? { version: 2, periods: {} };
 
-  // Open periods: THIS_MONTH (always) + the two prior months that exist and aren't closed yet.
   const candidates = [addMonths(thisMonth, -2), addMonths(thisMonth, -1), thisMonth];
-  const months: Array<{ month: string; state: MonthState }> = [];
+  const read: Array<{ month: string; doppId: string; ref: StateFileRef; state: MonthState }> = [];
   for (const m of candidates) {
-    const state = readMonth(m, rootId, run, download);
-    if (m === thisMonth) {
-      if (state) months.push({ month: m, state }); // current month only contributes once started
-    } else if (state && state.monthCloseSent !== 'yes') {
-      months.push({ month: m, state });
-    }
+    const r = readMonthRef(m, rootId, run, download);
+    if (!r) continue;
+    if (m === thisMonth || r.state.monthCloseSent !== 'yes') read.push({ month: m, ...r }); // current always; priors only while open
   }
 
-  const periods: PeriodPlan[] = [];
-  const notify: RollupPlan['notify'] = {};
-  for (const { month, state } of months) {
+  const periods: GatheredPeriod[] = read.map(({ month, doppId, ref, state }) => {
     const dated = markOverdue(state, today);
     const pay = actionableDocs(dated);
     const periodMeta = fs.periods?.[month] ?? {};
     const exportStatus = periodMeta.export_status;
     const { items, fingerprint } = updateNotify(periodMeta.notify?.items ?? {}, pay, exportStatus, today);
-    const priorSuppliers = new Set(months.filter((x) => x.month < month).flatMap((x) => x.state.documents.map((d) => d.supplier)));
+    const priorSuppliers = new Set(read.filter((x) => x.month < month).flatMap((x) => x.state.documents.map((d) => d.supplier)));
     const anomalies = scanAnomalies(dated, priorSuppliers);
     const over = thisMonth > month;
-    periods.push({
-      month,
-      pay,
-      anomalies,
-      exportNeeded: over && exportStatus !== 'reconciled',
-      approve: dated.monthCloseSent === 'yes' ? { drafts: dated.documents.filter((d) => d.fortnoxSent === 'yes').length } : null,
-      waiting: over && dated.monthCloseSent !== 'yes' && exportStatus !== 'reconciled' ? `${month}: väntar på kontoutdrag` : null,
-      storedFingerprint: periodMeta.notify?.fingerprint ?? null,
-      freshFingerprint: fingerprint,
-    });
-    notify[month] = { items, fingerprint };
+    return {
+      month, doppId, ref, dated, exportStatus, items, fingerprint,
+      overdueChanged: dated !== state,
+      plan: {
+        month, pay, anomalies,
+        exportNeeded: over && exportStatus !== 'reconciled',
+        approve: dated.monthCloseSent === 'yes' ? { drafts: dated.documents.filter((d) => d.fortnoxSent === 'yes').length } : null,
+        waiting: over && dated.monthCloseSent !== 'yes' && exportStatus !== 'reconciled' ? `${month}: väntar på kontoutdrag` : null,
+        storedFingerprint: periodMeta.notify?.fingerprint ?? null,
+        freshFingerprint: fingerprint,
+      },
+    };
+  });
+  return { rootId, fs, today, thisMonth, periods };
+}
+
+/** Read-only rollup: the plan the live run will apply. Writes NOTHING — the shadow logs this. */
+export function planFinanceRollup(deps: RollupDeps = {}): RollupPlan {
+  const today = deps.today ?? operatorToday();
+  const g = gatherRollup(deps);
+  if (!g) return { periods: [], notify: {}, todo: composeTodo([], today), push: null, detail: 'no drive root folder id' };
+  const periods = g.periods.map((p) => p.plan);
+  const notify: RollupPlan['notify'] = {};
+  for (const p of g.periods) notify[p.month] = { items: p.items, fingerprint: p.fingerprint };
+  return { periods, notify, todo: composeTodo(periods, g.today), push: composePush(periods, g.today), detail: `${periods.length} open period(s)` };
+}
+
+/** Upload the todo record to `<DRIVE_ROOT>/.doppelganger/todo-<today>.md` (overwrites the day's file). */
+function uploadTodo(rootId: string, today: string, content: string, run: GwsRunner): boolean {
+  const doppId = findChildId(rootId, '.doppelganger', DRIVE_FOLDER_MIME, run);
+  if (!doppId) return false;
+  const name = `todo-${today}.md`;
+  const existing = findChildId(doppId, name, null, run);
+  const dir = mkdtempSync(path.join(tmpdir(), 'dg-todo-'));
+  try {
+    writeFileSync(path.join(dir, name), content);
+    const res = existing
+      ? run(['drive', 'files', 'update', '--params', JSON.stringify({ fileId: existing }), '--upload', name, '--upload-content-type', 'text/markdown'], { cwd: dir })
+      : run(['drive', '+upload', name, '--parent', doppId, '--name', name, '--format', 'json'], { cwd: dir });
+    return res.ok;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+export interface ApplyResult {
+  periods: number;
+  pushed: boolean;
+  closed: string | null;
+  detail: string;
+}
+
+/**
+ * The live heartbeat run (what the `finance` orchestrator executes): gather the rollup, then WRITE —
+ * persist each period's overdue marks to state.md, write notify.items + fingerprint to state.json,
+ * upload the todo, push the operator (only when a fingerprint changed), and close the first ready prior
+ * month as drafts. Each write is independent + best-effort; a single Drive miss degrades that step, not
+ * the whole run. This is the dissolved entrepreneur run, deterministic and LLM-free.
+ */
+export function applyFinanceRollup(db: Db, deps: RollupDeps & { settings?: FinanceSettings } = {}): ApplyResult {
+  const run = deps.run ?? defaultGwsRunner;
+  const download = deps.download ?? makeDriveDownloader(run);
+  const g = gatherRollup(deps);
+  if (!g) return { periods: 0, pushed: false, closed: null, detail: 'no drive root folder id' };
+
+  // 1. overdue marks → state.md (only the periods that actually changed).
+  for (const p of g.periods) {
+    if (p.overdueChanged) {
+      const w = writeMonthState(p.dated, p.doppId, p.ref, run);
+      if (!w.ok) console.error(`[finance] state.md write for ${p.month} failed: ${w.reason}`);
+    }
   }
 
-  return {
-    periods,
-    notify,
-    todo: composeTodo(periods, today),
-    push: composePush(periods, today),
-    detail: `${periods.length} open period(s)`,
-  };
+  // 2. notify.items + fingerprint → state.json (merge over the existing periods, refresh last_run).
+  const periodsOut: Record<string, { export_status?: string; notify: { fingerprint: string | null; items: Record<string, NotifyItem> } }> = {};
+  for (const [m, meta] of Object.entries(g.fs.periods ?? {})) periodsOut[m] = { export_status: meta.export_status, notify: { fingerprint: meta.notify?.fingerprint ?? null, items: meta.notify?.items ?? {} } };
+  for (const p of g.periods) periodsOut[p.month] = { export_status: p.exportStatus, notify: { fingerprint: p.fingerprint, items: p.items } };
+  const lastRun = { ...((g.fs.last_run as Record<string, unknown>) ?? {}), cadence: new Date().toISOString() };
+  const wj = writeFinanceStateToDrive({ version: 2, last_run: lastRun, periods: periodsOut }, deps.financeState);
+  if (!wj.ok) console.error(`[finance] state.json write failed: ${wj.detail}`);
+
+  // 3. todo record + 4. operator push (changed-only).
+  const plans = g.periods.map((p) => p.plan);
+  uploadTodo(g.rootId, g.today, composeTodo(plans, g.today), run);
+  const push = composePush(plans, g.today);
+  let pushed = false;
+  if (push && config.operatorNumber) {
+    const target = operatorPushTarget(db, config.operatorNumber);
+    if (target) { insertOutbox(db, { channel: target.channel, conversation_id: target.conversationId, text: push }); pushed = true; }
+  }
+
+  // 5. close the FIRST ready prior month (over + reconciled + not closed) — at most one per run.
+  let closed: string | null = null;
+  const ready = g.periods.find((p) => g.thisMonth > p.month && p.exportStatus === 'reconciled' && p.dated.monthCloseSent !== 'yes');
+  if (ready) {
+    const r = runMonthClose(ready.month, { run, download, rootFolderId: () => g.rootId, settings: deps.settings });
+    if (r.closed) closed = ready.month;
+    console.log(`[finance] month-close ${ready.month}: ${r.detail}`);
+  }
+
+  return { periods: g.periods.length, pushed, closed, detail: `${g.periods.length} period(s)${pushed ? ', pushed' : ''}${closed ? `, closed ${closed}` : ''}` };
 }

@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { config } from '../config.ts';
-import { insertOutbox, lastEntrepreneurSuccess, operatorPushTarget, type Db } from '../db.ts';
+import { insertOutbox, lastFinanceRunSuccess, operatorPushTarget, type Db } from '../db.ts';
 import { lastFinanceGateSkip } from './finance.ts';
 import type { GateLogEntry } from './finance.ts';
 
@@ -42,7 +42,7 @@ export function runHealthcheck(
   // The entrepreneur is healthy if it EITHER succeeded recently OR the skip-gate recently, deliberately
   // skipped (nothing actionable) — a skip is the gate working, not the agent stalling. So age the
   // newest of {last success, last gate-skip}. No baseline at all (fresh deploy) is not a failure.
-  const last = lastEntrepreneurSuccess(db);
+  const last = lastFinanceRunSuccess(db);
   const skip = lastGateSkip();
   const tsCandidates = [last?.ts, skip?.ts]
     .filter((t): t is string => typeof t === 'string')
@@ -52,7 +52,7 @@ export function runHealthcheck(
     const ageHours = (Date.now() - Math.max(...tsCandidates)) / 3_600_000;
     if (ageHours > config.staleRunHours) {
       const h = Math.floor(ageHours);
-      pushAlert(db, `[healthcheck] Entrepreneur idle ${h}h — no successful run or deliberate skip (threshold: ${config.staleRunHours}h).`);
+      pushAlert(db, `[healthcheck] Finance run idle ${h}h — no successful run or deliberate skip (threshold: ${config.staleRunHours}h).`);
     }
   }
 

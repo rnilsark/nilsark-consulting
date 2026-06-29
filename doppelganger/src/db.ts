@@ -185,10 +185,12 @@ export function markOutboxSent(db: Db, id: number): void {
   db.prepare(`UPDATE outbox SET status = 'sent' WHERE id = ?`).run(id);
 }
 
-export function lastEntrepreneurSuccess(db: Db): { ts: string } | undefined {
+/** Newest successful finance heartbeat run. Counts both the TS `finance` orchestrator and the legacy
+ *  `entrepreneur` so the gate's backstop + the healthcheck stay correct across the cutover. */
+export function lastFinanceRunSuccess(db: Db): { ts: string } | undefined {
   return db
     .prepare(
-      `SELECT ts FROM events WHERE agent = 'entrepreneur' AND kind = 'finished' AND status = 'success' ORDER BY id DESC LIMIT 1`,
+      `SELECT ts FROM events WHERE agent IN ('finance', 'entrepreneur') AND kind = 'finished' AND status = 'success' ORDER BY id DESC LIMIT 1`,
     )
     .get() as { ts: string } | undefined;
 }

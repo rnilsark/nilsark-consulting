@@ -209,3 +209,43 @@ test('planFinanceRollup: no drive root → empty plan, no throw', () => {
   assert.equal(r.periods.length, 0);
   assert.equal(r.push, null);
 });
+
+// ---- applyFinanceRollup (write path, mocked Drive) --------------------------
+
+import { applyFinanceRollup } from '../src/adapters/finance-rollup.ts';
+import { openDb } from '../src/db.ts';
+import { readFileSync as rf } from 'node:fs';
+import nodePath from 'node:path';
+
+test('applyFinanceRollup: persists notify.items + fingerprint to state.json, uploads the todo, no throw', () => {
+  const db = openDb(':memory:');
+  const stateMd = renderStateMd({
+    ...emptyMonthState('2026-06'),
+    documents: [doc({ file: 'inv.pdf', supplier: 'Fortnox', amount: '450', dueDate: '2026-06-25', paymentStatus: 'unpaid' })],
+  });
+  const list = (p: string) => {
+    if (p.includes("name='2026-06'")) return { files: [{ id: 'M6' }] };
+    if (p.includes('.doppelganger')) return { files: [{ id: 'DOPP' }] };
+    if (p.includes('state.md')) return { files: [{ id: 'SM', headRevisionId: 'R1' }] };
+    if (p.includes('state.json')) return { files: [{ id: 'SJ' }] };
+    return { files: [] }; // prior months + the day's todo file: not present
+  };
+  let stateJson = '';
+  const run: GwsRunner = (args, opts) => {
+    if (args[2] === 'list') return okR(JSON.stringify(list(args[args.indexOf('--params') + 1] ?? '')));
+    if (args[2] === 'update' && args[args.indexOf('--upload') + 1] === 'state.json') { stateJson = rf(nodePath.join(opts!.cwd!, 'state.json'), 'utf8'); return okR('{}'); }
+    if (args[2] === 'update' || args[1] === '+upload' || args[2] === 'get') return okR('{}');
+    throw new Error(`unexpected: ${args.join(' ')}`);
+  };
+  const r = applyFinanceRollup(db, {
+    today: '2026-06-15',
+    run,
+    download: () => stateMd,
+    rootFolderId: () => 'ROOT',
+    financeState: { run, download: () => JSON.stringify({ version: 2, periods: {} }), rootFolderId: () => 'ROOT' },
+  });
+  assert.equal(r.periods, 1);
+  assert.equal(r.closed, null); // no ready prior month
+  assert.ok(stateJson.includes('Fortnox|450|2026-06-25'), 'the unpaid item is persisted to state.json');
+  assert.ok(stateJson.includes('"version": 2'));
+});

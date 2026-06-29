@@ -3,7 +3,7 @@ import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFile
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { config } from '../config.ts';
-import { insertQueue, lastEntrepreneurSuccess, type Db } from '../db.ts';
+import { insertQueue, lastFinanceRunSuccess, type Db } from '../db.ts';
 import {
   defaultGwsRunner,
   makeDriveDownloader,
@@ -16,25 +16,43 @@ import {
 } from './state.ts';
 
 // The finance orchestrator-star (deterministic, no LLM). It decides whether the daily
-// `entrepreneur/run` heartbeat needs to fire at all — the skip-gate from the star-clusters plan,
+// `finance/run` heartbeat needs to fire at all — the skip-gate from the star-clusters plan,
 // step 1. The god-object's "re-derive everything every run" was its own safety net; removing it
 // risks a silently dropped invoice (= a missing verification, with tax consequences), so this gate
 // is built CONSERVATIVE BY CONSTRUCTION: it skips only when it can PROVE nothing actionable changed,
 // fires the LLM on ANY ambiguity, logs every decision for audit, and is backstopped by an
 // unconditional fire whenever no successful run has landed within the backstop window.
 
-/** The entrepreneur's heartbeat task — the plain string the schedule enqueues. */
-export const ENTREPRENEUR_RUN_TASK = 'run';
+/** The finance heartbeat task — the plain string the gate enqueues for the `finance` orchestrator. */
+export const FINANCE_RUN_TASK = 'run';
 
 /**
- * The entrepreneur's settings file (its Drive root folder id lives here, like the agent reads it).
- * Under `agents/<agent>/` because that's the worker's cwd for the agent (`worker.ts`).
+ * The finance settings file (Drive root folder id, draft recipients, draftTestMode). Kept under the
+ * `entrepreneur/` dir — the file the box already has — so dissolving the entrepreneur agent doesn't
+ * require migrating prod state. It's just where the JSON lives; nothing LLM reads it anymore.
  */
-export const ENTREPRENEUR_SETTINGS_PATH = path.join(
+export const FINANCE_SETTINGS_PATH = path.join(
   config.agentSettingsDir,
   'entrepreneur',
   'settings.json',
 );
+
+/** The finance settings the TS orchestrators read (root folder id + month-close draft routing). */
+export interface FinanceSettings {
+  driveRootFolderId?: string;
+  myEmail?: string;
+  fortnoxEmail?: Record<string, string>;
+  draftTestMode?: boolean;
+}
+
+/** Read the whole settings.json, or `{}` if absent/unreadable. */
+export function readFinanceSettings(settingsPath: string = FINANCE_SETTINGS_PATH): FinanceSettings {
+  try {
+    return JSON.parse(readFileSync(settingsPath, 'utf8')) as FinanceSettings;
+  } catch {
+    return {};
+  }
+}
 
 export const DRIVE_FOLDER_MIME = 'application/vnd.google-apps.folder';
 
@@ -181,7 +199,7 @@ export function decideGate(
 }
 
 /** The entrepreneur's Drive root folder id, from its settings.json. null if unreadable → gate fires. */
-export function readDriveRootFolderId(settingsPath: string = ENTREPRENEUR_SETTINGS_PATH): string | null {
+export function readDriveRootFolderId(settingsPath: string = FINANCE_SETTINGS_PATH): string | null {
   try {
     const s = JSON.parse(readFileSync(settingsPath, 'utf8')) as { driveRootFolderId?: string };
     return typeof s.driveRootFolderId === 'string' && s.driveRootFolderId ? s.driveRootFolderId : null;
@@ -394,8 +412,8 @@ export function logGateDecision(entry: GateLogEntry, logPath: string = FINANCE_G
 /** Is a heartbeat `run` already pending or running? Avoids piling heartbeats on a slow/queued run. */
 function heartbeatAlreadyQueued(db: Db): boolean {
   const row = db
-    .prepare(`SELECT 1 FROM queue WHERE agent = 'entrepreneur' AND task = ? LIMIT 1`)
-    .get(ENTREPRENEUR_RUN_TASK);
+    .prepare(`SELECT 1 FROM queue WHERE agent = 'finance' AND task = ? LIMIT 1`)
+    .get(FINANCE_RUN_TASK);
   return row !== undefined;
 }
 
@@ -420,14 +438,14 @@ function gateDecision(db: Db, state: FinanceState | null, at: Date): GateDecisio
   if (heartbeatAlreadyQueued(db)) {
     return { action: 'skip', reason: 'heartbeat run already pending/running' };
   }
-  const last = lastEntrepreneurSuccess(db);
+  const last = lastFinanceRunSuccess(db);
   const lastSuccessAgeMs = last ? Math.max(0, at.getTime() - Date.parse(last.ts)) : null;
   const backstopMaxAgeMs = config.financeBackstopMaxAgeHours * 3_600_000;
   return decideGate(state, lastSuccessAgeMs, operatorToday(at), backstopMaxAgeMs);
 }
 
 /**
- * The gated heartbeat: decide, audit, and enqueue `entrepreneur/run` only when work is (or might be)
+ * The gated heartbeat: decide, audit, and enqueue `finance/run` only when work is (or might be)
  * due. Wired to the finance heartbeat cron in place of the old unconditional enqueue. Returns the
  * decision (handy for tests/logs).
  */
@@ -437,7 +455,7 @@ export function maybeEnqueueFinanceRun(db: Db, deps: GateDeps = defaultDeps): Ga
 
   deps.log({ ...decision, ts: at.toISOString() });
   if (decision.action === 'fire') {
-    insertQueue(db, { agent: 'entrepreneur', task: ENTREPRENEUR_RUN_TASK, parent: null });
+    insertQueue(db, { agent: 'finance', task: FINANCE_RUN_TASK, parent: null });
   }
   console.log(`[finance-gate] ${decision.action} (${decision.reason})`);
   return decision;
