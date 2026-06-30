@@ -53,10 +53,14 @@ function hash01(s) {
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
 // Each domain (cluster) gets its own angular sector around CORE, so related agents sit together —
-// a finance arc, a calendar one, a comms one — rather than one undifferentiated ring. No hub node or
-// label: the grouping is conveyed by proximity alone; the bright edges carry the actual signal flow.
-const DOMAIN_BASE = { finance: -52, calendar: 64, comms: 168 }; // sector-center degrees from CORE
+// a finance arc, a calendar one, a comms one — rather than one undifferentiated ring.
+const DOMAIN_BASE = { entrepreneur: -52, calendar: 64, comms: 168 }; // sector-center degrees from CORE
 const OTHER_BASE = 250;
+
+// Clusters drawn as a single trunk from CORE that branches to its members (an OFFLOADED sub-system),
+// rather than N direct spokes. Everything else stays a direct personal node wired straight to CORE.
+const TRUNKED = new Set(['entrepreneur']);
+const ANCHOR_R = 15; // radius of the cluster's branch-point (anchor) from CORE, inside the member arc
 
 /** CORE center; each domain's members fanned within its sector. Deterministic per-name jitter. */
 function layout(agents, clusters) {
@@ -82,6 +86,15 @@ function layout(agents, clusters) {
     const angle = ((OTHER_BASE + i * 42) * Math.PI) / 180;
     pos[ag.name] = { x: clamp(50 + Math.cos(angle) * 31, 11, 89), y: clamp(51 + Math.sin(angle) * 28, 15, 82) };
   });
+  // Trunked clusters: a branch-point on the sector center, between CORE and the members.
+  for (const cl of clusters) {
+    if (!TRUNKED.has(cl.name)) continue;
+    const ang = ((DOMAIN_BASE[cl.name] ?? OTHER_BASE) * Math.PI) / 180;
+    pos[`cl:${cl.name}`] = {
+      x: clamp(50 + Math.cos(ang) * ANCHOR_R, 11, 89),
+      y: clamp(51 + Math.sin(ang) * (ANCHOR_R * 0.9), 15, 82),
+    };
+  }
   return pos;
 }
 
@@ -207,10 +220,12 @@ function renderNodes(positions, agents) {
 const edgeEls = new Map(); // key -> line element
 const packetEls = new Map(); // key -> div element
 
-function renderEdges(positions, edges) {
+function renderEdges(positions, edges, trunkedMembers) {
   const svg = $('edges');
   const wanted = new Set();
   edges.forEach((e) => {
+    // A trunked member's CORE spoke is replaced by the cluster trunk+branch; drop it here.
+    if (e.from === CORE && trunkedMembers.has(e.to)) return;
     const pf = positions[e.from];
     const pt = positions[e.to];
     if (!pf || !pt) return;
@@ -235,10 +250,11 @@ function renderEdges(positions, edges) {
   }
 }
 
-function renderPackets(positions, edges) {
+function renderPackets(positions, edges, trunkedMembers) {
   const container = $('packets');
   const wanted = new Set();
   edges.filter((e) => e.active).forEach((e, i) => {
+    if (e.from === CORE && trunkedMembers.has(e.to)) return; // spoke hidden behind the trunk
     const pa = positions[e.from];
     const pb = positions[e.to];
     if (!pa || !pb) return;
@@ -264,6 +280,61 @@ function renderPackets(positions, edges) {
 
 // Orchestrator agents (TS coordinators) get a subtle cyan ring to read apart from judgment stars.
 const HUB_COL_DIM = 'rgba(90,200,255,.55)';
+
+// ---- cluster scaffold (trunk + branches + label) -----------------------------
+// Faint, static structure: one trunk from CORE to the cluster's branch-point, then a branch to each
+// member, plus the cluster label. Decorative only — real signal still flows on the live edges.
+const scaffoldEls = new Map();    // key -> svg line
+const clusterLabelEls = new Map(); // cluster name -> label div
+
+function putScaffoldLine(svg, key, p1, p2, width, opacity, want) {
+  want.add(key);
+  let line = scaffoldEls.get(key);
+  if (!line) {
+    line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('stroke', HUB_COL_DIM);
+    line.setAttribute('stroke-linecap', 'round');
+    line.setAttribute('vector-effect', 'non-scaling-stroke');
+    svg.insertBefore(line, svg.firstChild); // behind the live edges
+    scaffoldEls.set(key, line);
+  }
+  line.setAttribute('x1', p1.x); line.setAttribute('y1', p1.y);
+  line.setAttribute('x2', p2.x); line.setAttribute('y2', p2.y);
+  line.setAttribute('stroke-width', width);
+  line.setAttribute('opacity', opacity);
+}
+
+function renderScaffold(positions, clusters) {
+  const svg = $('edges');
+  const labels = $('nodes');
+  const wantLines = new Set();
+  const wantLabels = new Set();
+  const core = positions[CORE];
+  for (const cl of clusters) {
+    if (!TRUNKED.has(cl.name)) continue;
+    const anchor = positions[`cl:${cl.name}`];
+    if (!anchor) continue;
+    putScaffoldLine(svg, `trunk:${cl.name}`, core, anchor, 1.1, 0.34, wantLines);
+    for (const m of cl.members) {
+      const pm = positions[m];
+      if (pm) putScaffoldLine(svg, `branch:${cl.name}:${m}`, anchor, pm, 0.7, 0.15, wantLines);
+    }
+    wantLabels.add(cl.name);
+    let lab = clusterLabelEls.get(cl.name);
+    if (!lab) {
+      lab = document.createElement('div');
+      labels.appendChild(lab);
+      clusterLabelEls.set(cl.name, lab);
+    }
+    lab.textContent = cl.name;
+    lab.style.cssText =
+      `position:absolute;left:${anchor.x}%;top:${anchor.y}%;transform:translate(-50%,calc(-50% - 15px));` +
+      `font-size:9px;font-weight:600;letter-spacing:3px;text-transform:uppercase;color:${HUB_COL_DIM};` +
+      'pointer-events:none;z-index:1;white-space:nowrap;';
+  }
+  for (const [k, line] of scaffoldEls) if (!wantLines.has(k)) { line.remove(); scaffoldEls.delete(k); }
+  for (const [k, lab] of clusterLabelEls) if (!wantLabels.has(k)) { lab.remove(); clusterLabelEls.delete(k); }
+}
 
 // ---- header ------------------------------------------------------------------
 
@@ -405,12 +476,16 @@ function render() {
   if (!state.data) return;
   const data = state.data;
   if (state.selected && !data.agents.some((a) => a.name === state.selected)) state.selected = null;
-  const positions = layout(data.agents, data.clusters ?? []);
+  const clusters = data.clusters ?? [];
+  const positions = layout(data.agents, clusters);
+  const trunkedMembers = new Set();
+  for (const cl of clusters) if (TRUNKED.has(cl.name)) cl.members.forEach((m) => trunkedMembers.add(m));
   renderStats(data.stats);
   renderVersion(data.version);
   renderNodes(positions, data.agents);
-  renderEdges(positions, data.edges);
-  renderPackets(positions, data.edges);
+  renderScaffold(positions, clusters);
+  renderEdges(positions, data.edges, trunkedMembers);
+  renderPackets(positions, data.edges, trunkedMembers);
   renderDrawer(data);
 }
 

@@ -19,7 +19,9 @@ const ORCHESTRATORS = new Set(['intake', 'reconcile', 'finance']);
 
 /** Domain groupings — the structural "star formations". Each becomes a cluster tethered to CORE via a hub. */
 export const DOMAINS: Array<{ name: string; members: string[] }> = [
-  { name: 'finance', members: ['inbox', 'intake', 'classifier', 'reconcile', 'reconciler', 'finance'] },
+  // `entrepreneur` is an OFFLOADED sub-system — the dissolved entrepreneur agent, now six nodes. It's
+  // the one cluster drawn as a trunk-and-branch. `calendar`/`comms` are personal nodes wired direct.
+  { name: 'entrepreneur', members: ['inbox', 'intake', 'classifier', 'reconcile', 'reconciler', 'finance'] },
   { name: 'calendar', members: ['planner'] },
   { name: 'comms', members: ['triage', 'chat'] },
 ];
