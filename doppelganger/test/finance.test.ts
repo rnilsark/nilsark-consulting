@@ -193,7 +193,7 @@ function freshDb(): Db {
 
 /** Seed a successful entrepreneur run so the backstop branch is satisfied (age ~0). */
 function seedRecentSuccess(db: Db): void {
-  insertEvent(db, { run_id: 'r1', kind: 'finished', agent: 'entrepreneur', task: 'run', status: 'success' });
+  insertEvent(db, { run_id: 'r1', kind: 'finished', agent: 'digest', task: 'run', status: 'success' });
 }
 
 function item(over: Partial<NotifyItem> = {}): NotifyItem {

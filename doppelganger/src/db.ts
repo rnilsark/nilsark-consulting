@@ -185,12 +185,13 @@ export function markOutboxSent(db: Db, id: number): void {
   db.prepare(`UPDATE outbox SET status = 'sent' WHERE id = ?`).run(id);
 }
 
-/** Newest successful finance heartbeat run. Counts the current `digest` orchestrator plus its former
- *  names (`finance`, `entrepreneur`) so the gate's backstop + healthcheck stay correct across renames. */
+/** Newest successful `digest` heartbeat run, for the gate backstop + healthcheck. Forward-only: after a
+ *  rename, history under the old name simply doesn't count, so the gate fires one (cheap) extra rollup
+ *  until the first `digest` success lands — a null result reads as "fresh deploy", never an alert. */
 export function lastFinanceRunSuccess(db: Db): { ts: string } | undefined {
   return db
     .prepare(
-      `SELECT ts FROM events WHERE agent IN ('digest', 'finance', 'entrepreneur') AND kind = 'finished' AND status = 'success' ORDER BY id DESC LIMIT 1`,
+      `SELECT ts FROM events WHERE agent = 'digest' AND kind = 'finished' AND status = 'success' ORDER BY id DESC LIMIT 1`,
     )
     .get() as { ts: string } | undefined;
 }

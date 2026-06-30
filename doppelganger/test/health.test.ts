@@ -31,7 +31,7 @@ function seedOperatorDm(db: ReturnType<typeof freshDb>) {
 function insertSuccess(db: ReturnType<typeof freshDb>, runId: string, tsIso: string) {
   db.prepare(
     `INSERT INTO events (run_id, kind, ts, agent, task, parent, status, cost, summary) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(runId, 'finished', tsIso, 'entrepreneur', 'run', null, 'success', null, null);
+  ).run(runId, 'finished', tsIso, 'digest', 'run', null, 'success', null, null);
 }
 
 /** Run `fn` with config.operatorNumber temporarily set, then restore (test isolation). */
@@ -70,7 +70,7 @@ test('fresh last-success + auth ok → no outbox row', () => {
   assert.equal(selectPendingOutbox(db).length, 0);
 });
 
-test('no entrepreneur run on record yet (auth ok) → no alert (fresh deploy, not a failure)', () => {
+test('no digest run on record yet (auth ok) → no alert (fresh deploy, not a failure)', () => {
   const db = freshDb();
   seedOperatorDm(db);
   // no success events at all
