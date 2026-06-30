@@ -456,7 +456,7 @@ export function pollBankDrop(db: Db, deps: BankDropDeps = {}): { enqueued: numbe
   let enqueued = 0;
   for (const f of files) {
     if (!f.id || f.mimeType === DRIVE_FOLDER_MIME || seen.has(f.id)) continue;
-    insertQueue(db, { agent: 'reconcile', task: JSON.stringify({ driveFileId: f.id, filename: f.name ?? 'statement' }), parent: null });
+    insertQueue(db, { agent: 'statement', task: JSON.stringify({ driveFileId: f.id, filename: f.name ?? 'statement' }), parent: null });
     seen.add(f.id);
     enqueued++;
   }
@@ -492,8 +492,8 @@ function alreadySeenMessageIds(
   rootFolderId: () => string | null,
 ): Set<string> | null {
   const seen = new Set<string>();
-  // (a) on the queue right now (enqueued by the cursor poll but not yet filed) — any inbox/intake/reconcile row.
-  const rows = db.prepare(`SELECT task FROM queue WHERE agent IN ('inbox','intake','reconcile')`).all() as Array<{ task: string }>;
+  // (a) on the queue right now (enqueued by the cursor poll but not yet filed) — any inbox/intake/statement row.
+  const rows = db.prepare(`SELECT task FROM queue WHERE agent IN ('inbox','intake','statement')`).all() as Array<{ task: string }>;
   for (const r of rows) {
     try {
       const id = (JSON.parse(r.task) as { messageId?: string }).messageId;

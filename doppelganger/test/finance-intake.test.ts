@@ -170,7 +170,7 @@ test('pollBankDrop: enqueues a reconcile per new statement file, deduped, skips 
   };
   assert.equal(pollBankDrop(db, { run, rootFolderId: () => 'ROOT' }).enqueued, 1); // F1 only; SUB is a folder
   assert.equal(pollBankDrop(db, { run, rootFolderId: () => 'ROOT' }).enqueued, 0); // deduped on re-poll
-  const rows = db.prepare("SELECT task FROM queue WHERE agent='reconcile'").all() as Array<{ task: string }>;
+  const rows = db.prepare("SELECT task FROM queue WHERE agent='statement'").all() as Array<{ task: string }>;
   assert.equal(rows.length, 1);
   assert.equal((JSON.parse(rows[0].task) as { driveFileId: string }).driveFileId, 'F1');
 });

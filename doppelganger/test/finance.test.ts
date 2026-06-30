@@ -341,7 +341,7 @@ test('maybeEnqueueFinanceRun: fires → enqueues finance/run and audits', () => 
   const decision = maybeEnqueueFinanceRun(db, depsFor(stateWith(items, 'stale'), log));
 
   assert.equal(decision.action, 'fire');
-  const pending = selectPendingFifo(db).filter((r) => r.agent === 'finance' && r.task === 'run');
+  const pending = selectPendingFifo(db).filter((r) => r.agent === 'digest' && r.task === 'run');
   assert.equal(pending.length, 1);
   assert.equal(log.length, 1);
   assert.equal(log[0].action, 'fire');
@@ -372,7 +372,7 @@ test('maybeEnqueueFinanceRun: never piles a second heartbeat on a queued/running
 
   assert.equal(second.action, 'skip');
   assert.match(second.reason, /already pending/);
-  assert.equal(selectPendingFifo(db).filter((r) => r.agent === 'finance').length, 1);
+  assert.equal(selectPendingFifo(db).filter((r) => r.agent === 'digest').length, 1);
 });
 
 test('maybeEnqueueFinanceRun: missing state.json fires (self-healing / conservative)', () => {

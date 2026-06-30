@@ -71,8 +71,8 @@ export function startScheduler(db: Db, channels: Map<string, Channel>): void {
 
   cron.schedule(config.bankDropCron, () => {
     try {
-      const { enqueued } = pollBankDrop(db); // bank statements uploaded straight to Drive → reconcile
-      if (enqueued > 0) console.log(`[bank-drop] enqueued ${enqueued} statement(s) → reconcile`);
+      const { enqueued } = pollBankDrop(db); // bank statements uploaded straight to Drive → statement
+      if (enqueued > 0) console.log(`[bank-drop] enqueued ${enqueued} statement(s) → statement`);
     } catch (err) {
       console.error('[scheduler] bank-drop poll failed:', err);
     }

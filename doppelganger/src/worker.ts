@@ -35,9 +35,9 @@ export interface Outcome {
 /** The conversation a row belongs to: chat tasks ARE the id; triage tasks carry it in JSON. */
 function conversationIdFor(row: QueueRow): string | null {
   if (row.agent === 'chat') return row.task;
-  // triage carries the conversationId in JSON; finance does too when delegated from chat
+  // triage carries the conversationId in JSON; digest does too when delegated from chat
   // (its cron task is the plain string "run", which simply parses to null → no conversation).
-  if (row.agent === 'triage' || row.agent === 'finance') {
+  if (row.agent === 'triage' || row.agent === 'digest') {
     try {
       const parsed = JSON.parse(row.task) as { conversationId?: string };
       return typeof parsed.conversationId === 'string' ? parsed.conversationId : null;
@@ -343,7 +343,7 @@ async function runIntakeAgent(db: Db, row: QueueRow, runDir: string, outPath: st
 }
 
 /**
- * The `reconcile` agent is TS: download the statement (Gmail attachment or Drive drop), then
+ * The `statement` agent is TS: download the statement (Gmail attachment or Drive drop), then
  * `runReconcile` — which reads the statement's OWN dates to decide the period (no month is assumed),
  * dispatches the `reconciler` child for matching, and applies (mark paid + record txns) to the right
  * month's state.md + state.json. Writes out.json so the result is recorded.
@@ -353,8 +353,8 @@ async function runReconcileAgent(db: Db, row: QueueRow, runDir: string, outPath:
   try {
     task = JSON.parse(row.task);
   } catch {
-    writeFileSync(outPath, JSON.stringify({ status: 'error', summary: 'reconcile: task was not JSON' }));
-    return { status: 'error', summary: 'reconcile: task was not JSON', orders: [], cost: null };
+    writeFileSync(outPath, JSON.stringify({ status: 'error', summary: 'statement: task was not JSON' }));
+    return { status: 'error', summary: 'statement: task was not JSON', orders: [], cost: null };
   }
   const lines: string[] = [];
 
@@ -379,13 +379,13 @@ async function runReconcileAgent(db: Db, row: QueueRow, runDir: string, outPath:
   }
   const failed = lines.filter((l) => l.includes('failed') || l.includes('download failed')).length;
   const status: RunStatus = lines.length === 0 ? 'flagged' : failed === 0 ? 'success' : failed === lines.length ? 'error' : 'flagged';
-  const summary = `reconcile: ${lines.join(' | ') || 'no statement attachment'}`;
+  const summary = `statement: ${lines.join(' | ') || 'no statement attachment'}`;
   writeFileSync(outPath, JSON.stringify({ status, summary }));
   return { status, summary, orders: [], cost: null };
 }
 
 /**
- * The `finance` agent is TS, not an LLM. Three task shapes:
+ * The `digest` agent is TS, not an LLM. Three task shapes:
  *   - the plain string `run` (the heartbeat cron) → the full rollup, no reply.
  *   - `{ "mode": "ack", "supplier", "conversationId" }` (from chat) → mark the supplier paid, reply.
  *   - `{ "mode": "run", "conversationId" }` (from chat) → run the rollup + reply into that thread.
@@ -408,7 +408,7 @@ function runFinanceAgent(db: Db, row: QueueRow, outPath: string): Outcome {
     if (task.conversationId) replies = [{ conversationId: task.conversationId, text }];
   } else {
     const r = applyFinanceRollup(db);
-    summary = `finance: ${r.detail}`;
+    summary = `digest: ${r.detail}`;
     if (task?.conversationId) replies = [{ conversationId: task.conversationId, text: `Ekonomi uppdaterad (${r.detail}). Se din todo.` }];
   }
   writeFileSync(outPath, JSON.stringify({ status: 'success', summary, replies }));
@@ -438,9 +438,9 @@ async function main(): Promise<void> {
   let outcome: Outcome;
   if (row.agent === 'intake') {
     outcome = await runIntakeAgent(db, row, runDir, outPath); // TS orchestrator, not claude
-  } else if (row.agent === 'reconcile') {
+  } else if (row.agent === 'statement') {
     outcome = await runReconcileAgent(db, row, runDir, outPath); // TS orchestrator, not claude
-  } else if (row.agent === 'finance') {
+  } else if (row.agent === 'digest') {
     outcome = runFinanceAgent(db, row, outPath); // TS heartbeat rollup (the dissolved entrepreneur run)
   } else {
     acknowledgeChat(db, row); // sign of life BEFORE the slow LLM run; drains ahead of the reply

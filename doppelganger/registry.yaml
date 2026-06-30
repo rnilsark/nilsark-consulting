@@ -21,9 +21,9 @@ agents:
 
   # Cheap, fast gate over incoming finance email (mirrors `triage` for the inbox path). Sees only
   # untrusted message METADATA ({messageId, from, subject, snippet, attachments}) — never attachment
-  # bytes. Decides one thing: is this a bank statement (→ reconcile) or a document (→ intake), then
+  # bytes. Decides one thing: is this a bank statement (→ statement) or a document (→ intake), then
   # orders that scoped TS orchestrator to fetch + process that ONE message. Acts on nothing itself —
-  # no domain tools, can ONLY order `intake` or `reconcile`.
+  # no domain tools, can ONLY order `intake` or `statement`.
   inbox:
     can_be_called_by: [inbox-ingest]  # top-level (parent=null); documents intent
     tools: "Read,Write"               # Write is only for the out.json contract — no domain access
@@ -37,7 +37,7 @@ agents:
     model: sonnet
 
   # (The credentialed `entrepreneur` LLM agent was dissolved — every step it did is now deterministic
-  # TS: collection via intake/reconcile, the heartbeat via the `finance` orchestrator below. There is
+  # TS: collection via intake/statement, the heartbeat via the `digest` orchestrator below. There is
   # no monolithic finance LLM anymore; the only finance judgment left lives in the two kernels.)
 
   # First judgment kernel of the finance domain. Stateless: given ONE already-downloaded document,
@@ -59,27 +59,27 @@ agents:
 
   # Second judgment kernel: match a bank statement against the month's unpaid invoices. Stateless —
   # given the statement file + the invoice list, return each transaction with its matched invoice +
-  # confidence. No Drive/Gmail/state; the reconcile orchestrator applies the matches.
+  # confidence. No Drive/Gmail/state; the `statement` orchestrator applies the matches.
   reconciler:
-    can_be_called_by: [reconcile]
+    can_be_called_by: [statement]
     tools: "Read,Write,Skill"
     model: sonnet
 
-  # The finance reconcile orchestrator (TS, not an LLM): the worker runs runReconcile — read the
-  # month's unpaid invoices, dispatch `reconciler` for the matching, apply (mark paid + record txns)
-  # to state.md + state.json. Triggered by the `inbox` router (a statement emailed in) or the Drive
-  # drop-folder poll (a statement uploaded straight to Drive).
-  reconcile:
+  # The bank-statement orchestrator (TS, not an LLM): the worker runs runReconcile — read the month's
+  # unpaid invoices, dispatch `reconciler` for the matching, apply (mark paid + record txns) to
+  # state.md + state.json. Triggered by the `inbox` router (a statement emailed in) or the Drive
+  # drop-folder poll (a statement uploaded straight to Drive). Named for its input, not its kernel.
+  statement:
     can_be_called_by: [inbox]
     tools: ""
     kind: orchestrator
 
   # The finance heartbeat orchestrator (TS, not an LLM): the worker runs the rollup — mark overdue,
   # recompute notify.items + the actionable-set fingerprint, scan anomalies, compose + push the todo,
-  # and close the first ready prior month as Gmail DRAFTS. This is the dissolved `entrepreneur` run:
+  # and close the first ready prior month as Gmail DRAFTS. It digests the month's state into one todo;
   # all of it is deterministic procedure, so there is no model/tools — the worker executes TS. Fired
   # by the skip-gate (the heartbeat cron) and, for a forced month / ack, by chat.
-  finance:
+  digest:
     can_be_called_by: [schedule, chat]
     tools: ""
     kind: orchestrator

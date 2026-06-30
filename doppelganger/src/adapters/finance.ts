@@ -412,7 +412,7 @@ export function logGateDecision(entry: GateLogEntry, logPath: string = FINANCE_G
 /** Is a heartbeat `run` already pending or running? Avoids piling heartbeats on a slow/queued run. */
 function heartbeatAlreadyQueued(db: Db): boolean {
   const row = db
-    .prepare(`SELECT 1 FROM queue WHERE agent = 'finance' AND task = ? LIMIT 1`)
+    .prepare(`SELECT 1 FROM queue WHERE agent = 'digest' AND task = ? LIMIT 1`)
     .get(FINANCE_RUN_TASK);
   return row !== undefined;
 }
@@ -455,7 +455,7 @@ export function maybeEnqueueFinanceRun(db: Db, deps: GateDeps = defaultDeps): Ga
 
   deps.log({ ...decision, ts: at.toISOString() });
   if (decision.action === 'fire') {
-    insertQueue(db, { agent: 'finance', task: FINANCE_RUN_TASK, parent: null });
+    insertQueue(db, { agent: 'digest', task: FINANCE_RUN_TASK, parent: null });
   }
   console.log(`[finance-gate] ${decision.action} (${decision.reason})`);
   return decision;

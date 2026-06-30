@@ -15,13 +15,13 @@ export const CORE = 'core';
 export type NodeKind = 'judgment' | 'orchestrator';
 
 /** Which agents are deterministic TS orchestrators (hubs), not LLM judgment stars. Mirrors registry.yaml `kind`. */
-const ORCHESTRATORS = new Set(['intake', 'reconcile', 'finance']);
+const ORCHESTRATORS = new Set(['intake', 'statement', 'digest']);
 
 /** Domain groupings — the structural "star formations". Each becomes a cluster tethered to CORE via a hub. */
 export const DOMAINS: Array<{ name: string; members: string[] }> = [
   // `entrepreneur` is an OFFLOADED sub-system — the dissolved entrepreneur agent, now six nodes. It's
   // the one cluster drawn as a trunk-and-branch. `calendar`/`comms` are personal nodes wired direct.
-  { name: 'entrepreneur', members: ['inbox', 'intake', 'classifier', 'reconcile', 'reconciler', 'finance'] },
+  { name: 'entrepreneur', members: ['inbox', 'intake', 'classifier', 'statement', 'reconciler', 'digest'] },
   { name: 'calendar', members: ['planner'] },
   { name: 'comms', members: ['triage', 'chat'] },
 ];
