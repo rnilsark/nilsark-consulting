@@ -111,7 +111,6 @@ const round2 = (n: number): number => Math.round(n * 100) / 100;
 
 export function project(
   windowEvents: EventRow[],
-  todayEvents: EventRow[],
   registryAgents: string[],
 ): DashboardState {
   const runs = foldRuns(windowEvents);
@@ -178,10 +177,10 @@ export function project(
     addEdge(parentAgent, run.agent, !run.terminal && !!run.started);
   }
 
-  const finishedToday = todayEvents.filter((e) => e.kind === 'finished');
+  const finished = windowEvents.filter((e) => e.kind === 'finished');
   const stats = {
-    runs: finishedToday.length,
-    cost: round2(finishedToday.reduce((sum, e) => sum + (e.cost ?? 0), 0)),
+    runs: finished.length,
+    cost: round2(finished.reduce((sum, e) => sum + (e.cost ?? 0), 0)),
     active: agents.filter((a) => a.running).length,
   };
 

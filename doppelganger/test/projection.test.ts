@@ -23,7 +23,7 @@ function ev(partial: Partial<EventRow>): EventRow {
 
 test('lone started → running agent, ACTIVE=1, active core spoke', () => {
   const events = [ev({ run_id: 'R1', kind: 'started' })];
-  const state = project(events, events, ['planner']);
+  const state = project(events, ['planner']);
 
   const planner = state.agents.find((a) => a.name === 'planner')!;
   assert.equal(planner.status, 'running');
@@ -42,7 +42,7 @@ test('started + finished(success) → done state, cost in stats, history grows',
     ev({ run_id: 'R2', kind: 'started' }),
     ev({ run_id: 'R2', kind: 'finished', status: 'success', cost: 0.21, summary: 'second brief' }),
   ];
-  const state = project(events, events, ['planner']);
+  const state = project(events, ['planner']);
 
   const planner = state.agents.find((a) => a.name === 'planner')!;
   assert.equal(planner.status, 'done');
@@ -61,21 +61,18 @@ test('started + finished(success) → done state, cost in stats, history grows',
 test('flagged / error / died map to the right status class', () => {
   const flagged = project(
     [ev({ run_id: 'F1', kind: 'started' }), ev({ run_id: 'F1', kind: 'finished', status: 'flagged', cost: 0.1 })],
-    [],
     ['planner'],
   );
   assert.equal(flagged.agents[0].status, 'flagged');
 
   const errored = project(
     [ev({ run_id: 'E1', kind: 'started' }), ev({ run_id: 'E1', kind: 'finished', status: 'error', cost: 0.1 })],
-    [],
     ['planner'],
   );
   assert.equal(errored.agents[0].status, 'error');
 
   const died = project(
     [ev({ run_id: 'D1', kind: 'started' }), ev({ run_id: 'D1', kind: 'died' })],
-    [],
     ['planner'],
   );
   assert.equal(died.agents[0].status, 'error');
@@ -83,7 +80,7 @@ test('flagged / error / died map to the right status class', () => {
 });
 
 test('registered agent without events is idle', () => {
-  const state = project([], [], ['planner']);
+  const state = project([], ['planner']);
   assert.equal(state.agents.length, 1);
   assert.equal(state.agents[0].status, 'idle');
   assert.equal(state.agents[0].count, 0);
@@ -91,7 +88,7 @@ test('registered agent without events is idle', () => {
 
 test('agent present only in events (not registry) still appears', () => {
   const events = [ev({ agent: 'ghost', run_id: 'G1', kind: 'started' })];
-  const state = project(events, events, ['planner']);
+  const state = project(events, ['planner']);
   const names = state.agents.map((a) => a.name).sort();
   assert.deepEqual(names, ['ghost', 'planner']);
 });
@@ -101,7 +98,7 @@ test('child run with parent run_id derives an agent→agent edge', () => {
     ev({ agent: 'cfo', run_id: 'P1', kind: 'started' }),
     ev({ agent: 'planner', run_id: 'C1', kind: 'started', parent: 'P1' }),
   ];
-  const state = project(events, events, ['planner', 'cfo']);
+  const state = project(events, ['planner', 'cfo']);
 
   const delegate = state.edges.find((e) => e.from === 'cfo' && e.to === 'planner')!;
   assert.equal(delegate.active, true);

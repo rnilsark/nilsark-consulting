@@ -44,9 +44,7 @@ export function startWeb(
     if (url.pathname === '/api/state') {
       const win = parseWindow(url.searchParams.get('window'));
       const windowEvents = eventsSince.all(windowSince(win)) as EventRow[];
-      const todayEvents =
-        win === 'today' ? windowEvents : (eventsSince.all(windowSince('today')) as EventRow[]);
-      const state = project(windowEvents, todayEvents, Object.keys(registry.agents));
+      const state = project(windowEvents, Object.keys(registry.agents));
       const configs = loadAgentConfigs(registry);
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
       res.end(JSON.stringify({ ...state, configs, version: getVersion() }));

@@ -338,7 +338,7 @@ function renderScaffold(positions, clusters) {
 
 // ---- header ------------------------------------------------------------------
 
-const WINDOWS = [['hour', 'HOUR'], ['today', 'TODAY'], ['live', 'LIVE']];
+const WINDOWS = [['hour', 'HOUR'], ['today', 'TODAY'], ['live', '24H']];
 
 function renderWindows() {
   const container = $('windows');
