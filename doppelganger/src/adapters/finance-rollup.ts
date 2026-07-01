@@ -26,7 +26,7 @@ import {
   type FinanceState,
   type NotifyItem,
 } from './finance.ts';
-import { normalizeAmount } from './finance-intake.ts';
+import { normalizeAmount } from './intake.ts';
 import { runMonthClose } from './finance-close.ts';
 import {
   defaultGwsRunner,

@@ -17,7 +17,7 @@ import {
   readFinanceSettings,
   type FinanceSettings,
 } from './finance.ts';
-import { downloadDriveFileToPath } from './finance-intake.ts';
+import { downloadDriveFileToPath } from './reconcile.ts';
 import {
   defaultGwsRunner,
   makeDriveDownloader,
