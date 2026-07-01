@@ -1,33 +1,34 @@
-// The finance heartbeat's JUDGMENT-LESS rollup, in TypeScript — the work the `entrepreneur` LLM run
-// used to do once collection was peeled off it. None of it is judgment: marking overdue is a date
-// compare, the actionable set is a filter, the notify-items + fingerprint are a pinned contract
-// (`finance.ts` already recomputes the fingerprint byte-for-byte), and the anomaly flags are fixed
-// rules. So it lives here as deterministic, unit-tested code, and the `finance` orchestrator-star runs
-// it instead of paying for an LLM. Pure functions over the parsed `MonthState` + `state.json`; Drive
-// I/O is the orchestrator's job (kept out of here so this stays trivially testable).
+// The `digest` orchestrator, in TypeScript — the finance heartbeat's JUDGMENT-LESS rollup, plus the
+// skip-gate that decides whether a heartbeat needs to run at all. None of it is judgment: marking
+// overdue is a date compare, the actionable set is a filter, the notify-items + fingerprint are a
+// pinned contract (`ledger-store.ts` recomputes the fingerprint byte-for-byte), and the anomaly flags
+// are fixed rules. So it's deterministic, unit-tested code the `digest` worker runs instead of paying
+// for an LLM. Pure functions over the parsed `MonthState` + `state.json`; Drive I/O is the worker's
+// job (kept out of the pure parts so they stay trivially testable).
 
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { config } from '../config.ts';
-import { insertOutbox, operatorPushTarget, type Db } from '../db.ts';
+import { insertOutbox, insertQueue, lastDigestRunSuccess, operatorPushTarget, type Db } from '../db.ts';
 import {
+  DIGEST_RUN_TASK,
   DRIVE_FOLDER_MIME,
   bucketFor,
   computeFingerprint,
   findChildId,
   operatorToday,
   readDriveRootFolderId,
-  readFinanceSettings,
-  readFinanceStateFromDrive,
-  writeFinanceStateToDrive,
-  type DriveStateDeps,
-  type FinanceSettings,
-  type FinanceState,
+  readLedgerSettings,
+  readLedgerState,
+  writeLedgerState,
+  type LedgerStoreDeps,
+  type LedgerSettings,
+  type LedgerState,
   type NotifyItem,
-} from './finance.ts';
+} from './ledger-store.ts';
 import { normalizeAmount } from './intake.ts';
-import { runMonthClose } from './finance-close.ts';
+import { runMonthClose } from './month-close.ts';
 import {
   defaultGwsRunner,
   makeDriveDownloader,
@@ -53,16 +54,19 @@ function num(s: string): number | null {
 }
 
 /**
- * Mark every unpaid leverantörsfaktura/skattekonto whose due date has passed as `overdue`. Pure —
- * returns the same object reference when nothing changed (so the caller can skip a needless state.md write).
+ * Reconcile the `overdue` flag with the current due date, both ways: an unpaid leverantörsfaktura/
+ * skattekonto whose due date has passed becomes `overdue`, and an `overdue` one whose due date is no
+ * longer in the past reverts to `unpaid` (e.g. after a due-date correction — a stale overdue must clear,
+ * or it keeps nagging with the wrong urgency). Never touches `paid`. Pure — returns the same object
+ * reference when nothing changed (so the caller can skip a needless state.md write).
  */
 export function markOverdue(state: MonthState, today: string): MonthState {
   let changed = false;
   const documents = state.documents.map((d) => {
-    if (UNPAID_TYPES.has(d.type) && d.paymentStatus === 'unpaid' && bucketFor(d.dueDate, today) === 'overdue') {
-      changed = true;
-      return { ...d, paymentStatus: 'overdue' };
-    }
+    if (!UNPAID_TYPES.has(d.type)) return d;
+    const overdue = bucketFor(d.dueDate, today) === 'overdue';
+    if (d.paymentStatus === 'unpaid' && overdue) { changed = true; return { ...d, paymentStatus: 'overdue' }; }
+    if (d.paymentStatus === 'overdue' && !overdue) { changed = true; return { ...d, paymentStatus: 'unpaid' }; }
     return d;
   });
   return changed ? { ...state, documents } : state;
@@ -83,7 +87,7 @@ export function actionableDocs(state: MonthState): LedgerDocument[] {
  *     acked AND the statement hasn't confirmed it yet (`export_status` pending/dropped/absent) — the
  *     bank-statement blind spot: trust the operator's "I paid it" until the statement arrives.
  *   - a docKey no longer actionable (paid/closed) → dropped (not carried over).
- * Fingerprint is computed by the SAME `finance.ts` function the gate uses, so the two never drift.
+ * Fingerprint is computed by the SAME `ledger-store.ts` function the gate uses, so the two never drift.
  */
 export function updateNotify(
   prev: Record<string, NotifyItem>,
@@ -219,17 +223,17 @@ export function composePush(periods: PeriodPlan[], today: string): string | null
   return blocks.length ? blocks.join('\n\n') : null;
 }
 
-// ---- read-only orchestrator (planFinanceRollup): reads Drive, computes, writes NOTHING -------------
+// ---- read-only orchestrator (planDigest): reads Drive, computes, writes NOTHING -------------
 
-export interface RollupDeps {
+export interface DigestDeps {
   run?: GwsRunner;
   download?: DriveDownloader;
   rootFolderId?: () => string | null;
-  financeState?: DriveStateDeps;
+  financeState?: LedgerStoreDeps;
   today?: string;
 }
 
-export interface RollupPlan {
+export interface DigestPlan {
   periods: PeriodPlan[];
   /** per-period notify.items the live run would persist (keyed by period). */
   notify: Record<string, { items: Record<string, NotifyItem>; fingerprint: string | null }>;
@@ -261,7 +265,7 @@ interface GatheredPeriod {
 
 interface Gathered {
   rootId: string;
-  fs: FinanceState;
+  fs: LedgerState;
   today: string;
   thisMonth: string;
   periods: GatheredPeriod[];
@@ -285,13 +289,13 @@ function readMonthRef(
 }
 
 /**
- * The shared read+compute both `planFinanceRollup` (read-only) and `applyFinanceRollup` (read-write)
+ * The shared read+compute both `planDigest` (read-only) and `runDigest` (read-write)
  * build on, so the plan and the writes can never diverge. Open periods = THIS_MONTH plus the two prior
  * months whose state.md exists and is still open (`Month-close sent: no`). Per period: mark overdue
  * (in-memory), build the PAY set, recompute notify.items + fingerprint (carrying acks from state.json),
  * scan anomalies, decide export/approve/waiting. Returns null when there's no Drive root.
  */
-function gatherRollup(deps: RollupDeps): Gathered | null {
+function gatherDigest(deps: DigestDeps): Gathered | null {
   const run = deps.run ?? defaultGwsRunner;
   const download = deps.download ?? makeDriveDownloader(run);
   const today = deps.today ?? operatorToday();
@@ -299,7 +303,7 @@ function gatherRollup(deps: RollupDeps): Gathered | null {
   const rootId = (deps.rootFolderId ?? readDriveRootFolderId)();
   if (!rootId) return null;
 
-  const fs: FinanceState = readFinanceStateFromDrive(deps.financeState) ?? { version: 2, periods: {} };
+  const fs: LedgerState = readLedgerState(deps.financeState) ?? { version: 2, periods: {} };
 
   const candidates = [addMonths(thisMonth, -2), addMonths(thisMonth, -1), thisMonth];
   const read: Array<{ month: string; doppId: string; ref: StateFileRef; state: MonthState }> = [];
@@ -335,12 +339,12 @@ function gatherRollup(deps: RollupDeps): Gathered | null {
 }
 
 /** Read-only rollup: the plan the live run will apply. Writes NOTHING — the shadow logs this. */
-export function planFinanceRollup(deps: RollupDeps = {}): RollupPlan {
+export function planDigest(deps: DigestDeps = {}): DigestPlan {
   const today = deps.today ?? operatorToday();
-  const g = gatherRollup(deps);
+  const g = gatherDigest(deps);
   if (!g) return { periods: [], notify: {}, todo: composeTodo([], today), push: null, detail: 'no drive root folder id' };
   const periods = g.periods.map((p) => p.plan);
-  const notify: RollupPlan['notify'] = {};
+  const notify: DigestPlan['notify'] = {};
   for (const p of g.periods) notify[p.month] = { items: p.items, fingerprint: p.fingerprint };
   return { periods, notify, todo: composeTodo(periods, g.today), push: composePush(periods, g.today), detail: `${periods.length} open period(s)` };
 }
@@ -371,16 +375,16 @@ export interface ApplyResult {
 }
 
 /**
- * The live heartbeat run (what the `finance` orchestrator executes): gather the rollup, then WRITE —
+ * The live heartbeat run (what the `digest` worker executes): gather the rollup, then WRITE —
  * persist each period's overdue marks to state.md, write notify.items + fingerprint to state.json,
  * upload the todo, push the operator (only when a fingerprint changed), and close the first ready prior
  * month as drafts. Each write is independent + best-effort; a single Drive miss degrades that step, not
  * the whole run. This is the dissolved entrepreneur run, deterministic and LLM-free.
  */
-export function applyFinanceRollup(db: Db, deps: RollupDeps & { settings?: FinanceSettings } = {}): ApplyResult {
+export function runDigest(db: Db, deps: DigestDeps & { settings?: LedgerSettings } = {}): ApplyResult {
   const run = deps.run ?? defaultGwsRunner;
   const download = deps.download ?? makeDriveDownloader(run);
-  const g = gatherRollup(deps);
+  const g = gatherDigest(deps);
   if (!g) return { periods: 0, pushed: false, closed: null, detail: 'no drive root folder id' };
 
   // 1. overdue marks → state.md (only the periods that actually changed).
@@ -396,7 +400,7 @@ export function applyFinanceRollup(db: Db, deps: RollupDeps & { settings?: Finan
   for (const [m, meta] of Object.entries(g.fs.periods ?? {})) periodsOut[m] = { export_status: meta.export_status, notify: { fingerprint: meta.notify?.fingerprint ?? null, items: meta.notify?.items ?? {} } };
   for (const p of g.periods) periodsOut[p.month] = { export_status: p.exportStatus, notify: { fingerprint: p.fingerprint, items: p.items } };
   const lastRun = { ...((g.fs.last_run as Record<string, unknown>) ?? {}), cadence: new Date().toISOString() };
-  const wj = writeFinanceStateToDrive({ version: 2, last_run: lastRun, periods: periodsOut }, deps.financeState);
+  const wj = writeLedgerState({ version: 2, last_run: lastRun, periods: periodsOut }, deps.financeState);
   if (!wj.ok) console.error(`[finance] state.json write failed: ${wj.detail}`);
 
   // 3. todo record + 4. operator push (changed-only).
@@ -428,10 +432,10 @@ export function applyFinanceRollup(db: Db, deps: RollupDeps & { settings?: Finan
  * substring of the docKey (which embeds the supplier). No Gmail, no Drive document I/O — just state.json.
  * The bank statement still wins later: a reconcile that doesn't confirm the payment re-surfaces it.
  */
-export function ackPayment(supplier: string, deps: { financeState?: DriveStateDeps; today?: string } = {}): { matched: number } {
+export function ackPayment(supplier: string, deps: { financeState?: LedgerStoreDeps; today?: string } = {}): { matched: number } {
   const needle = supplier.trim().toLowerCase();
   if (!needle) return { matched: 0 };
-  const fs = readFinanceStateFromDrive(deps.financeState);
+  const fs = readLedgerState(deps.financeState);
   if (!fs) return { matched: 0 };
   const today = deps.today ?? operatorToday();
   const periodsOut = { ...(fs.periods ?? {}) };
@@ -448,6 +452,145 @@ export function ackPayment(supplier: string, deps: { financeState?: DriveStateDe
     }
     if (changed) periodsOut[month] = { ...meta, notify: { fingerprint: computeFingerprint(items, today), items } };
   }
-  if (matched > 0) writeFinanceStateToDrive({ version: 2, last_run: fs.last_run, periods: periodsOut }, deps.financeState);
+  if (matched > 0) writeLedgerState({ version: 2, last_run: fs.last_run, periods: periodsOut }, deps.financeState);
   return { matched };
+}
+
+// ---- the heartbeat gate: decide whether to enqueue a `digest` run ------------
+// The scheduler asks this once a day. It's the digest's own trigger, so it lives with the digest (not
+// the ledger store it reads): decide → audit → enqueue. Conservative — every uncertain branch fires.
+
+/** Append-only audit trail of gate decisions, so "what did TS skip" is reviewable. */
+const DIGEST_GATE_LOG_PATH = path.join(config.home, 'finance-gate.jsonl');
+
+export type GateAction = 'fire' | 'skip';
+
+export interface GateDecision {
+  action: GateAction;
+  reason: string;
+}
+
+export interface GateLogEntry extends GateDecision {
+  ts: string;
+}
+
+/**
+ * The pure decision: given the current state, the age of the last successful run, and today, should
+ * the daily heartbeat fire or skip? Conservative — every uncertain branch returns `fire`.
+ */
+export function decideGate(
+  state: LedgerState | null,
+  lastSuccessAgeMs: number | null,
+  today: string,
+  backstopMaxAgeMs: number,
+): GateDecision {
+  // Backstop: if no successful run has landed within the window (or ever), fire unconditionally.
+  // This is the periodic full sweep that keeps anything wrongly skipped surfacing within days.
+  if (lastSuccessAgeMs === null) return { action: 'fire', reason: 'backstop: no successful run on record' };
+  if (lastSuccessAgeMs >= backstopMaxAgeMs) {
+    return { action: 'fire', reason: `backstop: last success ${Math.round(lastSuccessAgeMs / 3_600_000)}h ago` };
+  }
+
+  if (state === null) return { action: 'fire', reason: 'state.json missing or unreadable' };
+  if (state.version !== 2) return { action: 'fire', reason: `state.json version ${String(state.version)} ≠ 2` };
+
+  const periods = state.periods ?? {};
+  for (const [period, p] of Object.entries(periods)) {
+    const notify = p.notify ?? {};
+    const stored = notify.fingerprint ?? null;
+    if (stored === null) return { action: 'fire', reason: `period ${period}: no stored fingerprint` };
+    const fresh = computeFingerprint(notify.items ?? {}, today);
+    if (fresh === null) return { action: 'fire', reason: `period ${period}: actionable set unprovable (missing/!ISO due_date)` };
+    if (fresh !== stored) {
+      return { action: 'fire', reason: `period ${period}: fingerprint changed (${stored} → ${fresh})` };
+    }
+  }
+  return { action: 'skip', reason: 'no actionable change in any open period' };
+}
+
+/**
+ * The last gate decision that was a `skip`, from the audit log — newest first. The healthcheck treats
+ * a recent deliberate skip (nothing actionable) as a healthy heartbeat, not a stalled agent.
+ */
+export function lastDigestGateSkip(logPath: string = DIGEST_GATE_LOG_PATH): GateLogEntry | null {
+  let content: string;
+  try {
+    content = readFileSync(logPath, 'utf8');
+  } catch {
+    return null;
+  }
+  const lines = content.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    try {
+      const entry = JSON.parse(line) as GateLogEntry;
+      if (entry.action === 'skip') return entry;
+    } catch {
+      // ignore a malformed line and keep scanning back
+    }
+  }
+  return null;
+}
+
+/** Append one decision to the audit log. Best-effort — a logging failure never blocks the gate. */
+export function logGateDecision(entry: GateLogEntry, logPath: string = DIGEST_GATE_LOG_PATH): void {
+  try {
+    mkdirSync(path.dirname(logPath), { recursive: true });
+    appendFileSync(logPath, `${JSON.stringify(entry)}\n`);
+  } catch (err) {
+    console.error(`[digest-gate] failed to append audit log: ${(err as Error).message}`);
+  }
+}
+
+/** Is a heartbeat `run` already pending or running? Avoids piling heartbeats on a slow/queued run. */
+function heartbeatAlreadyQueued(db: Db): boolean {
+  const row = db
+    .prepare(`SELECT 1 FROM queue WHERE agent = 'digest' AND task = ? LIMIT 1`)
+    .get(DIGEST_RUN_TASK);
+  return row !== undefined;
+}
+
+export interface GateDeps {
+  readState: () => LedgerState | null;
+  now: () => Date;
+  log: (entry: GateLogEntry) => void;
+}
+
+const defaultGateDeps: GateDeps = {
+  readState: () => readLedgerState(),
+  now: () => new Date(),
+  log: (entry) => logGateDecision(entry),
+};
+
+/**
+ * The whole verdict, including the parts that need the DB/clock (dedup guard, last-success age); the
+ * pure core stays in `decideGate`. One place produces the decision, so the caller is a flat
+ * decide → log → act.
+ */
+function gateDecision(db: Db, state: LedgerState | null, at: Date): GateDecision {
+  if (heartbeatAlreadyQueued(db)) {
+    return { action: 'skip', reason: 'heartbeat run already pending/running' };
+  }
+  const last = lastDigestRunSuccess(db);
+  const lastSuccessAgeMs = last ? Math.max(0, at.getTime() - Date.parse(last.ts)) : null;
+  const backstopMaxAgeMs = config.financeBackstopMaxAgeHours * 3_600_000;
+  return decideGate(state, lastSuccessAgeMs, operatorToday(at), backstopMaxAgeMs);
+}
+
+/**
+ * The gated heartbeat: decide, audit, and enqueue a `digest` run only when work is (or might be) due.
+ * Wired to the heartbeat cron in place of an unconditional enqueue. Returns the decision (handy for
+ * tests/logs).
+ */
+export function maybeEnqueueDigest(db: Db, deps: GateDeps = defaultGateDeps): GateDecision {
+  const at = deps.now();
+  const decision = gateDecision(db, deps.readState(), at);
+
+  deps.log({ ...decision, ts: at.toISOString() });
+  if (decision.action === 'fire') {
+    insertQueue(db, { agent: 'digest', task: DIGEST_RUN_TASK, parent: null });
+  }
+  console.log(`[digest-gate] ${decision.action} (${decision.reason})`);
+  return decision;
 }

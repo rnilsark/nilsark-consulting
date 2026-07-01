@@ -5,7 +5,7 @@ import {
   operatorToday,
   prevMonth,
   readDriveRootFolderId,
-} from './finance.ts';
+} from './ledger-store.ts';
 import {
   defaultGwsRunner,
   makeDriveDownloader,

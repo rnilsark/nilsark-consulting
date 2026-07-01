@@ -188,7 +188,7 @@ export function markOutboxSent(db: Db, id: number): void {
 /** Newest successful `digest` heartbeat run, for the gate backstop + healthcheck. Forward-only: after a
  *  rename, history under the old name simply doesn't count, so the gate fires one (cheap) extra rollup
  *  until the first `digest` success lands — a null result reads as "fresh deploy", never an alert. */
-export function lastFinanceRunSuccess(db: Db): { ts: string } | undefined {
+export function lastDigestRunSuccess(db: Db): { ts: string } | undefined {
   return db
     .prepare(
       `SELECT ts FROM events WHERE agent = 'digest' AND kind = 'finished' AND status = 'success' ORDER BY id DESC LIMIT 1`,

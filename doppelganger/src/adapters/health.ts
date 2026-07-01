@@ -1,8 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { config } from '../config.ts';
-import { insertOutbox, lastFinanceRunSuccess, operatorPushTarget, type Db } from '../db.ts';
-import { lastFinanceGateSkip } from './finance.ts';
-import type { GateLogEntry } from './finance.ts';
+import { insertOutbox, lastDigestRunSuccess, operatorPushTarget, type Db } from '../db.ts';
+import { lastDigestGateSkip, type GateLogEntry } from './digest.ts';
 
 export type AuthPing = () => { ok: boolean; detail: string };
 
@@ -37,12 +36,12 @@ function pushAlert(db: Db, text: string): void {
 export function runHealthcheck(
   db: Db,
   authPing: AuthPing = defaultAuthPing,
-  lastGateSkip: LastGateSkip = lastFinanceGateSkip,
+  lastGateSkip: LastGateSkip = lastDigestGateSkip,
 ): void {
   // The entrepreneur is healthy if it EITHER succeeded recently OR the skip-gate recently, deliberately
   // skipped (nothing actionable) — a skip is the gate working, not the agent stalling. So age the
   // newest of {last success, last gate-skip}. No baseline at all (fresh deploy) is not a failure.
-  const last = lastFinanceRunSuccess(db);
+  const last = lastDigestRunSuccess(db);
   const skip = lastGateSkip();
   const tsCandidates = [last?.ts, skip?.ts]
     .filter((t): t is string => typeof t === 'string')

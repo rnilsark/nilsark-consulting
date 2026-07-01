@@ -3,16 +3,16 @@ import { getChannelCursor, insertOutbox, operatorPushTarget, setChannelCursor, t
 import {
   operatorToday,
   prevMonth,
-  readFinanceStateFromDrive,
-  type DriveStateDeps,
-} from './finance.ts';
+  readLedgerState,
+  type LedgerStoreDeps,
+} from './ledger-store.ts';
 
 // The month-start nudge: early each month, ask the operator once to drop last month's bank statement
 // in the Drive folder — but only if it isn't reconciled yet and no statement has arrived.
 
 export interface NudgeDeps {
   today?: string;
-  financeState?: DriveStateDeps;
+  financeState?: LedgerStoreDeps;
 }
 
 /**
@@ -27,7 +27,7 @@ export function bankStatementNudge(db: Db, deps: NudgeDeps = {}): { nudged: bool
   const period = prevMonth(today);
   if (getChannelCursor(db, 'banknudge') === period) return { nudged: false, detail: `already nudged for ${period}` };
 
-  const fs = readFinanceStateFromDrive(deps.financeState);
+  const fs = readLedgerState(deps.financeState);
   if (fs?.periods?.[period]?.export_status === 'reconciled') {
     setChannelCursor(db, 'banknudge', period); // mark so we don't recheck all month
     return { nudged: false, detail: `${period} already reconciled` };

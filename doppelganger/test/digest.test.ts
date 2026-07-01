@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { actionableDocs, markOverdue, scanAnomalies, updateNotify } from '../src/adapters/finance-rollup.ts';
-import { computeFingerprint } from '../src/adapters/finance.ts';
+import { actionableDocs, markOverdue, scanAnomalies, updateNotify } from '../src/adapters/digest.ts';
+import { computeFingerprint } from '../src/adapters/ledger-store.ts';
 import type { LedgerDocument, MonthState } from '../src/adapters/state.ts';
 
 const EMPTY_HASH = 'e3b0c44298fc1c14'; // sha256("") first 16 hex — the no-actionable-items fingerprint
@@ -34,6 +34,12 @@ test('markOverdue: a past-due unpaid invoice becomes overdue; future + non-invoi
 test('markOverdue: no change → returns the same reference (no needless write)', () => {
   const state = ms([doc({ dueDate: '2026-06-30' })]);
   assert.equal(markOverdue(state, '2026-06-15'), state);
+});
+
+test('markOverdue: a stale overdue reverts to unpaid once its due date is corrected to the future', () => {
+  const state = ms([doc({ file: 'skatt.pdf', type: 'skattekonto', paymentStatus: 'overdue', dueDate: '2026-07-12' })]);
+  const out = markOverdue(state, '2026-07-01');
+  assert.equal(out.documents.find((d) => d.file === 'skatt.pdf')?.paymentStatus, 'unpaid');
 });
 
 // ---- actionableDocs ---------------------------------------------------------
@@ -124,7 +130,7 @@ test('scanAnomalies: same supplier+amount twice → both flagged as duplicates',
 
 // ---- payUrgency / composeTodo / composePush ---------------------------------
 
-import { composePush, composeTodo, payUrgency, planFinanceRollup, type PeriodPlan } from '../src/adapters/finance-rollup.ts';
+import { composePush, composeTodo, payUrgency, planDigest, type PeriodPlan } from '../src/adapters/digest.ts';
 import { emptyMonthState, renderStateMd, type GwsRunner, type GwsResult } from '../src/adapters/state.ts';
 
 test('payUrgency: overdue/≤2d → URGENT, ≤7d → SOON, else SCHEDULED', () => {
@@ -166,11 +172,11 @@ test('composePush: null when no fingerprint changed; summarizes only changed per
   assert.ok(push?.includes('brådskande')); // overdue → urgent marker
 });
 
-// ---- planFinanceRollup (read-only orchestrator, mocked Drive) ---------------
+// ---- planDigest (read-only orchestrator, mocked Drive) ---------------
 
 const okR = (stdout: string): GwsResult => ({ ok: true, stdout, detail: '' });
 
-test('planFinanceRollup: reads this month, builds the PAY set + a changed fingerprint, writes nothing', () => {
+test('planDigest: reads this month, builds the PAY set + a changed fingerprint, writes nothing', () => {
   // One open current month with a single unpaid invoice, and no stored fingerprint → push fires.
   const stateMd = renderStateMd({
     ...emptyMonthState('2026-06'),
@@ -189,14 +195,14 @@ test('planFinanceRollup: reads this month, builds the PAY set + a changed finger
     if (args[2] === 'update' || args[1] === '+upload') { wrote = true; return okR('{}'); }
     throw new Error(`unexpected: ${args.join(' ')}`);
   };
-  const r = planFinanceRollup({
+  const r = planDigest({
     today: '2026-06-15',
     run,
     download: () => stateMd,
     rootFolderId: () => 'ROOT',
     financeState: { run, download: () => JSON.stringify({ version: 2, periods: {} }), rootFolderId: () => 'ROOT' },
   });
-  assert.equal(wrote, false, 'planFinanceRollup is read-only');
+  assert.equal(wrote, false, 'planDigest is read-only');
   assert.equal(r.periods.length, 1);
   assert.equal(r.periods[0].pay.length, 1);
   assert.notEqual(r.periods[0].freshFingerprint, r.periods[0].storedFingerprint); // null stored → changed
@@ -204,20 +210,20 @@ test('planFinanceRollup: reads this month, builds the PAY set + a changed finger
   assert.deepEqual(Object.keys(r.notify['2026-06'].items), ['Fortnox|450|2026-06-20']);
 });
 
-test('planFinanceRollup: no drive root → empty plan, no throw', () => {
-  const r = planFinanceRollup({ today: '2026-06-15', rootFolderId: () => null });
+test('planDigest: no drive root → empty plan, no throw', () => {
+  const r = planDigest({ today: '2026-06-15', rootFolderId: () => null });
   assert.equal(r.periods.length, 0);
   assert.equal(r.push, null);
 });
 
-// ---- applyFinanceRollup (write path, mocked Drive) --------------------------
+// ---- runDigest (write path, mocked Drive) --------------------------
 
-import { applyFinanceRollup } from '../src/adapters/finance-rollup.ts';
+import { runDigest } from '../src/adapters/digest.ts';
 import { openDb } from '../src/db.ts';
 import { readFileSync as rf } from 'node:fs';
 import nodePath from 'node:path';
 
-test('applyFinanceRollup: persists notify.items + fingerprint to state.json, uploads the todo, no throw', () => {
+test('runDigest: persists notify.items + fingerprint to state.json, uploads the todo, no throw', () => {
   const db = openDb(':memory:');
   const stateMd = renderStateMd({
     ...emptyMonthState('2026-06'),
@@ -237,7 +243,7 @@ test('applyFinanceRollup: persists notify.items + fingerprint to state.json, upl
     if (args[2] === 'update' || args[1] === '+upload' || args[2] === 'get') return okR('{}');
     throw new Error(`unexpected: ${args.join(' ')}`);
   };
-  const r = applyFinanceRollup(db, {
+  const r = runDigest(db, {
     today: '2026-06-15',
     run,
     download: () => stateMd,
@@ -252,7 +258,7 @@ test('applyFinanceRollup: persists notify.items + fingerprint to state.json, upl
 
 // ---- ackPayment (chat ack fast-path) ----------------------------------------
 
-import { ackPayment } from '../src/adapters/finance-rollup.ts';
+import { ackPayment } from '../src/adapters/digest.ts';
 
 test('ackPayment: marks the named supplier acknowledged, recomputes fingerprint, persists', () => {
   const state = {

@@ -8,10 +8,10 @@ import {
   operatorToday,
   projectNotifyItem,
   readDriveRootFolderId,
-  readFinanceStateFromDrive,
-  writeFinanceStateToDrive,
-  type DriveStateDeps,
-} from './finance.ts';
+  readLedgerState,
+  writeLedgerState,
+  type LedgerStoreDeps,
+} from './ledger-store.ts';
 import {
   defaultGwsRunner,
   emptyMonthState,
@@ -26,7 +26,7 @@ import {
   type ProcessedMessage,
 } from './state.ts';
 
-// The finance orchestrator's intake half: take ONE downloaded document, get its classification from
+// The intake orchestrator: take ONE downloaded document, get its classification from
 // the `classifier` judgment agent (LLM), then do the PROCEDURE in TS — normalize the amount, derive
 // the payment status and Drive folder, assemble the ledger row, and file it (Drive upload + state.md
 // write). `runIntake` is the full path the `intake` worker runs in place of a whole entrepreneur LLM run.
@@ -250,7 +250,7 @@ export function resolveWritableMonth(homeMonth: string, currentMonth: string, fi
 }
 
 /**
- * The finance orchestrator's full intake of one document: classify (judgment agent) → normalize +
+ * The intake orchestrator's full pass over one document: classify (judgment agent) → normalize +
  * assemble the row (TS) → upload + merge into state.md (TS). This is what the inbox path calls (via the
  * `intake` worker) in place of a whole entrepreneur LLM run. A flagged classification still files the doc but marks the
  * Processed-Gmail row `error` (so a future sweep revisits it). Never throws on a Drive miss.
@@ -259,7 +259,7 @@ export async function runIntake(
   db: Db,
   month: string,
   doc: IntakeDoc,
-  deps: { dispatch?: DispatchOptions; filing?: FilingDeps; financeState?: DriveStateDeps } = {},
+  deps: { dispatch?: DispatchOptions; filing?: FilingDeps; financeState?: LedgerStoreDeps } = {},
 ): Promise<RunIntakeResult> {
   const ir = await intakeDocument(db, month, { filePath: doc.filePath, filename: doc.filename }, deps.dispatch);
   if (ir.status === 'failed' || !ir.document) {
@@ -288,8 +288,8 @@ export async function runIntake(
   // skip-gate surfaces it. A failure here doesn't un-file the doc — the ledger is the record of truth,
   // and the weekly backstop still catches an item the gate didn't learn about. Best-effort.
   let gateNote = '';
-  const projected = projectNotifyItem(readFinanceStateFromDrive(deps.financeState) ?? { version: 2, periods: {} }, fileMonth, ir.document, operatorToday());
-  const wj = writeFinanceStateToDrive(projected, deps.financeState);
+  const projected = projectNotifyItem(readLedgerState(deps.financeState) ?? { version: 2, periods: {} }, fileMonth, ir.document, operatorToday());
+  const wj = writeLedgerState(projected, deps.financeState);
   if (!wj.ok) gateNote = ` (state.json not updated: ${wj.detail})`;
 
   return { status: 'filed', detail: `${fr.detail}${gateNote}`, driveFileId: fr.driveFileId, runId: ir.runId };

@@ -3,7 +3,7 @@ import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFile
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { config } from '../config.ts';
-import { insertQueue, lastFinanceRunSuccess, type Db } from '../db.ts';
+import { insertQueue, lastDigestRunSuccess, type Db } from '../db.ts';
 import {
   defaultGwsRunner,
   makeDriveDownloader,
@@ -15,30 +15,26 @@ import {
   type LedgerDocument,
 } from './state.ts';
 
-// The finance orchestrator-star (deterministic, no LLM). It decides whether the daily
-// `finance/run` heartbeat needs to fire at all — the skip-gate from the star-clusters plan,
-// step 1. The god-object's "re-derive everything every run" was its own safety net; removing it
-// risks a silently dropped invoice (= a missing verification, with tax consequences), so this gate
-// is built CONSERVATIVE BY CONSTRUCTION: it skips only when it can PROVE nothing actionable changed,
-// fires the LLM on ANY ambiguity, logs every decision for audit, and is backstopped by an
-// unconditional fire whenever no successful run has landed within the backstop window.
+// The ledger store: the AUTHORITATIVE run-metadata `state.json` on Drive (read/write), plus the shared
+// Drive/date/fingerprint helpers the finance pipeline builds on. Deterministic, no LLM. The `digest`
+// heartbeat and its skip-gate live in `digest.ts`; this module is only the state + plumbing they read.
 
-/** The finance heartbeat task — the plain string the gate enqueues for the `finance` orchestrator. */
-export const FINANCE_RUN_TASK = 'run';
+/** The heartbeat task — the plain string the gate enqueues for the `digest` orchestrator. */
+export const DIGEST_RUN_TASK = 'run';
 
 /**
  * The finance settings file (Drive root folder id, draft recipients, draftTestMode). Kept under the
- * `entrepreneur/` dir — the file the box already has — so dissolving the entrepreneur agent doesn't
- * require migrating prod state. It's just where the JSON lives; nothing LLM reads it anymore.
+ * legacy `entrepreneur/` settings dir — the file the box already has — so the rename didn't require
+ * migrating prod state. It's just where the JSON lives; nothing LLM reads it anymore.
  */
-export const FINANCE_SETTINGS_PATH = path.join(
+export const LEDGER_SETTINGS_PATH = path.join(
   config.agentSettingsDir,
   'entrepreneur',
   'settings.json',
 );
 
 /** The finance settings the TS orchestrators read (root folder id + month-close draft routing). */
-export interface FinanceSettings {
+export interface LedgerSettings {
   driveRootFolderId?: string;
   myEmail?: string;
   fortnoxEmail?: Record<string, string>;
@@ -46,18 +42,15 @@ export interface FinanceSettings {
 }
 
 /** Read the whole settings.json, or `{}` if absent/unreadable. */
-export function readFinanceSettings(settingsPath: string = FINANCE_SETTINGS_PATH): FinanceSettings {
+export function readLedgerSettings(settingsPath: string = LEDGER_SETTINGS_PATH): LedgerSettings {
   try {
-    return JSON.parse(readFileSync(settingsPath, 'utf8')) as FinanceSettings;
+    return JSON.parse(readFileSync(settingsPath, 'utf8')) as LedgerSettings;
   } catch {
     return {};
   }
 }
 
 export const DRIVE_FOLDER_MIME = 'application/vnd.google-apps.folder';
-
-/** Append-only audit trail of gate decisions, so "what did TS skip" is reviewable (review #4). */
-export const FINANCE_GATE_LOG_PATH = path.join(config.home, 'finance-gate.jsonl');
 
 /**
  * One actionable item, as the entrepreneur projects it into `state.json` `notify.items` (keyed by
@@ -84,21 +77,10 @@ export interface PeriodState {
   notify?: NotifyState;
 }
 
-export interface FinanceState {
+export interface LedgerState {
   version?: number;
   last_run?: unknown;
   periods?: Record<string, PeriodState>;
-}
-
-export type GateAction = 'fire' | 'skip';
-
-export interface GateDecision {
-  action: GateAction;
-  reason: string;
-}
-
-export interface GateLogEntry extends GateDecision {
-  ts: string;
 }
 
 /** Today's date as a YYYY-MM-DD string in the operator's timezone (matches the agent's `date +%F`). */
@@ -164,42 +146,8 @@ export function computeFingerprint(
   return createHash('sha256').update(canonical).digest('hex').slice(0, 16);
 }
 
-/**
- * The pure decision: given the current state, the age of the last successful run, and today, should
- * the daily heartbeat fire the LLM or skip? Conservative — every uncertain branch returns `fire`.
- */
-export function decideGate(
-  state: FinanceState | null,
-  lastSuccessAgeMs: number | null,
-  today: string,
-  backstopMaxAgeMs: number,
-): GateDecision {
-  // Backstop: if no successful run has landed within the window (or ever), fire unconditionally.
-  // This is the periodic full sweep that keeps anything wrongly skipped surfacing within days.
-  if (lastSuccessAgeMs === null) return { action: 'fire', reason: 'backstop: no successful run on record' };
-  if (lastSuccessAgeMs >= backstopMaxAgeMs) {
-    return { action: 'fire', reason: `backstop: last success ${Math.round(lastSuccessAgeMs / 3_600_000)}h ago` };
-  }
-
-  if (state === null) return { action: 'fire', reason: 'state.json missing or unreadable' };
-  if (state.version !== 2) return { action: 'fire', reason: `state.json version ${String(state.version)} ≠ 2` };
-
-  const periods = state.periods ?? {};
-  for (const [period, p] of Object.entries(periods)) {
-    const notify = p.notify ?? {};
-    const stored = notify.fingerprint ?? null;
-    if (stored === null) return { action: 'fire', reason: `period ${period}: no stored fingerprint` };
-    const fresh = computeFingerprint(notify.items ?? {}, today);
-    if (fresh === null) return { action: 'fire', reason: `period ${period}: actionable set unprovable (missing/!ISO due_date)` };
-    if (fresh !== stored) {
-      return { action: 'fire', reason: `period ${period}: fingerprint changed (${stored} → ${fresh})` };
-    }
-  }
-  return { action: 'skip', reason: 'no actionable change in any open period' };
-}
-
 /** The entrepreneur's Drive root folder id, from its settings.json. null if unreadable → gate fires. */
-export function readDriveRootFolderId(settingsPath: string = FINANCE_SETTINGS_PATH): string | null {
+export function readDriveRootFolderId(settingsPath: string = LEDGER_SETTINGS_PATH): string | null {
   try {
     const s = JSON.parse(readFileSync(settingsPath, 'utf8')) as { driveRootFolderId?: string };
     return typeof s.driveRootFolderId === 'string' && s.driveRootFolderId ? s.driveRootFolderId : null;
@@ -247,7 +195,7 @@ export function ensureChildFolder(parentId: string, name: string, run: GwsRunner
   }
 }
 
-export interface DriveStateDeps {
+export interface LedgerStoreDeps {
   run?: GwsRunner;
   download?: DriveDownloader;
   rootFolderId?: () => string | null;
@@ -260,7 +208,7 @@ export interface DriveStateDeps {
  * EVERY failure (no root id, folder/file not found, gws error, bad JSON, download throw) returns null,
  * which the gate reads as "can't prove the set → fire". Conservative by construction.
  */
-export function readFinanceStateFromDrive(deps: DriveStateDeps = {}): FinanceState | null {
+export function readLedgerState(deps: LedgerStoreDeps = {}): LedgerState | null {
   const run = deps.run ?? defaultGwsRunner;
   const download = deps.download ?? makeDriveDownloader(run);
   const rootId = (deps.rootFolderId ?? readDriveRootFolderId)();
@@ -270,7 +218,7 @@ export function readFinanceStateFromDrive(deps: DriveStateDeps = {}): FinanceSta
   const fileId = findChildId(folderId, 'state.json', null, run);
   if (!fileId) return null;
   try {
-    return JSON.parse(download(fileId)) as FinanceState;
+    return JSON.parse(download(fileId)) as LedgerState;
   } catch {
     return null;
   }
@@ -286,11 +234,11 @@ const UNPAID_STATUSES = new Set(['unpaid', 'overdue']);
  * Pure: the input is not mutated. Forces `version: 2` so the gate trusts it.
  */
 export function projectNotifyItem(
-  state: FinanceState,
+  state: LedgerState,
   period: string,
   doc: LedgerDocument,
   today: string,
-): FinanceState {
+): LedgerState {
   if (!UNPAID_STATUSES.has(doc.paymentStatus) || !doc.dueDate) return state;
   const bucket = bucketFor(doc.dueDate, today);
   if (bucket === 'unparseable') return state;
@@ -317,10 +265,10 @@ export function projectNotifyItem(
  * (paid → no longer actionable). Fingerprint left stale so the gate re-derives. Pure; forces v2.
  */
 export function markReconciled(
-  state: FinanceState,
+  state: LedgerState,
   period: string,
   paid: Array<{ supplier: string; amount: string; dueDate: string }>,
-): FinanceState {
+): LedgerState {
   const periods = { ...(state.periods ?? {}) };
   const p = { ...(periods[period] ?? {}) };
   p.export_status = 'reconciled';
@@ -333,9 +281,9 @@ export function markReconciled(
 }
 
 /** Write the run-metadata `state.json` back to the Drive mirror. JSON only, so no markdown-render. */
-export function writeFinanceStateToDrive(
-  state: FinanceState,
-  deps: DriveStateDeps = {},
+export function writeLedgerState(
+  state: LedgerState,
+  deps: LedgerStoreDeps = {},
 ): { ok: boolean; detail: string } {
   const run = deps.run ?? defaultGwsRunner;
   const rootId = (deps.rootFolderId ?? readDriveRootFolderId)();
@@ -370,7 +318,7 @@ export interface ShadowReport {
  * before letting it own the write path. Any resolution miss is reported as `found:false` (benign),
  * never throws — best-effort by design.
  */
-export function shadowValidateMonth(month: string, deps: DriveStateDeps = {}): ShadowReport {
+export function shadowValidateMonth(month: string, deps: LedgerStoreDeps = {}): ShadowReport {
   const run = deps.run ?? defaultGwsRunner;
   const download = deps.download ?? makeDriveDownloader(run);
   try {
@@ -399,89 +347,3 @@ export function shadowValidateMonth(month: string, deps: DriveStateDeps = {}): S
   }
 }
 
-/**
- * The last gate decision that was a `skip`, from the audit log — newest first. The healthcheck treats
- * a recent deliberate skip (nothing actionable) as a healthy heartbeat, not a stalled agent.
- */
-export function lastFinanceGateSkip(logPath: string = FINANCE_GATE_LOG_PATH): GateLogEntry | null {
-  let content: string;
-  try {
-    content = readFileSync(logPath, 'utf8');
-  } catch {
-    return null;
-  }
-  const lines = content.split('\n');
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i].trim();
-    if (!line) continue;
-    try {
-      const entry = JSON.parse(line) as GateLogEntry;
-      if (entry.action === 'skip') return entry;
-    } catch {
-      // ignore a malformed line and keep scanning back
-    }
-  }
-  return null;
-}
-
-/** Append one decision to the audit log. Best-effort — a logging failure never blocks the gate. */
-export function logGateDecision(entry: GateLogEntry, logPath: string = FINANCE_GATE_LOG_PATH): void {
-  try {
-    mkdirSync(path.dirname(logPath), { recursive: true });
-    appendFileSync(logPath, `${JSON.stringify(entry)}\n`);
-  } catch (err) {
-    console.error(`[finance-gate] failed to append audit log: ${(err as Error).message}`);
-  }
-}
-
-/** Is a heartbeat `run` already pending or running? Avoids piling heartbeats on a slow/queued run. */
-function heartbeatAlreadyQueued(db: Db): boolean {
-  const row = db
-    .prepare(`SELECT 1 FROM queue WHERE agent = 'digest' AND task = ? LIMIT 1`)
-    .get(FINANCE_RUN_TASK);
-  return row !== undefined;
-}
-
-export interface GateDeps {
-  readState: () => FinanceState | null;
-  now: () => Date;
-  log: (entry: GateLogEntry) => void;
-}
-
-const defaultDeps: GateDeps = {
-  readState: () => readFinanceStateFromDrive(),
-  now: () => new Date(),
-  log: (entry) => logGateDecision(entry),
-};
-
-/**
- * The whole verdict, including the parts that need the DB/clock (dedup guard, last-success age); the
- * pure core stays in `decideGate`. One place produces the decision, so the caller is a flat
- * decide → log → act.
- */
-function gateDecision(db: Db, state: FinanceState | null, at: Date): GateDecision {
-  if (heartbeatAlreadyQueued(db)) {
-    return { action: 'skip', reason: 'heartbeat run already pending/running' };
-  }
-  const last = lastFinanceRunSuccess(db);
-  const lastSuccessAgeMs = last ? Math.max(0, at.getTime() - Date.parse(last.ts)) : null;
-  const backstopMaxAgeMs = config.financeBackstopMaxAgeHours * 3_600_000;
-  return decideGate(state, lastSuccessAgeMs, operatorToday(at), backstopMaxAgeMs);
-}
-
-/**
- * The gated heartbeat: decide, audit, and enqueue `finance/run` only when work is (or might be)
- * due. Wired to the finance heartbeat cron in place of the old unconditional enqueue. Returns the
- * decision (handy for tests/logs).
- */
-export function maybeEnqueueFinanceRun(db: Db, deps: GateDeps = defaultDeps): GateDecision {
-  const at = deps.now();
-  const decision = gateDecision(db, deps.readState(), at);
-
-  deps.log({ ...decision, ts: at.toISOString() });
-  if (decision.action === 'fire') {
-    insertQueue(db, { agent: 'digest', task: FINANCE_RUN_TASK, parent: null });
-  }
-  console.log(`[finance-gate] ${decision.action} (${decision.reason})`);
-  return decision;
-}

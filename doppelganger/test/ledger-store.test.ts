@@ -7,18 +7,20 @@ import { insertEvent, openDb, selectPendingFifo, type Db } from '../src/db.ts';
 import {
   bucketFor,
   computeFingerprint,
-  decideGate,
-  lastFinanceGateSkip,
   markReconciled,
-  maybeEnqueueFinanceRun,
   projectNotifyItem,
-  readFinanceStateFromDrive,
+  readLedgerState,
   shadowValidateMonth,
-  type FinanceState,
+  type LedgerState,
+  type NotifyItem,
+} from '../src/adapters/ledger-store.ts';
+import {
+  decideGate,
+  lastDigestGateSkip,
+  maybeEnqueueDigest,
   type GateDeps,
   type GateLogEntry,
-  type NotifyItem,
-} from '../src/adapters/finance.ts';
+} from '../src/adapters/digest.ts';
 import { readFileSync } from 'node:fs';
 import type { GwsResult, GwsRunner } from '../src/adapters/state.ts';
 
@@ -26,7 +28,7 @@ const FIXTURE_MD = readFileSync(path.join(import.meta.dirname, 'fixtures', 'stat
 
 const BACKSTOP_MS = 168 * 3_600_000; // mirror the default window
 
-// ---- readFinanceStateFromDrive (authoritative state.json on the Drive mirror) ----------------------
+// ---- readLedgerState (authoritative state.json on the Drive mirror) ----------------------
 
 const gwsOk = (stdout: string): GwsResult => ({ ok: true, stdout, detail: '' });
 const gwsFail = (detail: string): GwsResult => ({ ok: false, stdout: '', detail });
@@ -45,8 +47,8 @@ function driveRunner(over: { folder?: GwsResult; file?: GwsResult } = {}): GwsRu
   };
 }
 
-test('readFinanceStateFromDrive: resolves folder→file→download and parses v2 state', () => {
-  const state = readFinanceStateFromDrive({
+test('readLedgerState: resolves folder→file→download and parses v2 state', () => {
+  const state = readLedgerState({
     run: driveRunner(),
     download: () => DRIVE_STATE_V2,
     rootFolderId: () => 'ROOT',
@@ -55,12 +57,12 @@ test('readFinanceStateFromDrive: resolves folder→file→download and parses v2
   assert.ok(state?.periods?.['2026-06']);
 });
 
-test('readFinanceStateFromDrive: no root folder id → null (gate fires)', () => {
-  assert.equal(readFinanceStateFromDrive({ run: driveRunner(), download: () => DRIVE_STATE_V2, rootFolderId: () => null }), null);
+test('readLedgerState: no root folder id → null (gate fires)', () => {
+  assert.equal(readLedgerState({ run: driveRunner(), download: () => DRIVE_STATE_V2, rootFolderId: () => null }), null);
 });
 
-test('readFinanceStateFromDrive: .doppelganger folder missing → null', () => {
-  const state = readFinanceStateFromDrive({
+test('readLedgerState: .doppelganger folder missing → null', () => {
+  const state = readLedgerState({
     run: driveRunner({ folder: gwsOk(JSON.stringify({ files: [] })) }),
     download: () => DRIVE_STATE_V2,
     rootFolderId: () => 'ROOT',
@@ -68,8 +70,8 @@ test('readFinanceStateFromDrive: .doppelganger folder missing → null', () => {
   assert.equal(state, null);
 });
 
-test('readFinanceStateFromDrive: state.json missing → null', () => {
-  const state = readFinanceStateFromDrive({
+test('readLedgerState: state.json missing → null', () => {
+  const state = readLedgerState({
     run: driveRunner({ file: gwsOk(JSON.stringify({ files: [] })) }),
     download: () => DRIVE_STATE_V2,
     rootFolderId: () => 'ROOT',
@@ -77,8 +79,8 @@ test('readFinanceStateFromDrive: state.json missing → null', () => {
   assert.equal(state, null);
 });
 
-test('readFinanceStateFromDrive: a gws list error → null', () => {
-  const state = readFinanceStateFromDrive({
+test('readLedgerState: a gws list error → null', () => {
+  const state = readLedgerState({
     run: () => gwsFail('network down'),
     download: () => DRIVE_STATE_V2,
     rootFolderId: () => 'ROOT',
@@ -86,8 +88,8 @@ test('readFinanceStateFromDrive: a gws list error → null', () => {
   assert.equal(state, null);
 });
 
-test('readFinanceStateFromDrive: a bad-JSON / failed download → null (never throws)', () => {
-  const state = readFinanceStateFromDrive({
+test('readLedgerState: a bad-JSON / failed download → null (never throws)', () => {
+  const state = readLedgerState({
     run: driveRunner(),
     download: () => { throw new Error('download boom'); },
     rootFolderId: () => 'ROOT',
@@ -141,7 +143,7 @@ test('shadowValidateMonth: a gws error during resolution is caught, never throws
   assert.equal(r.clean, true);
 });
 
-// ---- lastFinanceGateSkip (healthcheck reads this) --------------------------------------------------
+// ---- lastDigestGateSkip (healthcheck reads this) --------------------------------------------------
 
 function withGateLog(lines: string[], fn: (logPath: string) => void): void {
   const dir = mkdtempSync(path.join(tmpdir(), 'dg-gate-'));
@@ -154,7 +156,7 @@ function withGateLog(lines: string[], fn: (logPath: string) => void): void {
   }
 }
 
-test('lastFinanceGateSkip: returns the newest skip, ignoring later fires', () => {
+test('lastDigestGateSkip: returns the newest skip, ignoring later fires', () => {
   withGateLog(
     [
       JSON.stringify({ action: 'skip', reason: 'a', ts: '2026-06-20T08:00:00Z' }),
@@ -162,27 +164,27 @@ test('lastFinanceGateSkip: returns the newest skip, ignoring later fires', () =>
       JSON.stringify({ action: 'fire', reason: 'c', ts: '2026-06-22T08:00:00Z' }),
     ],
     (logPath) => {
-      const e = lastFinanceGateSkip(logPath);
+      const e = lastDigestGateSkip(logPath);
       assert.equal(e?.ts, '2026-06-21T08:00:00Z'); // newest *skip*, not the later fire
     },
   );
 });
 
-test('lastFinanceGateSkip: no skips (only fires) → null', () => {
+test('lastDigestGateSkip: no skips (only fires) → null', () => {
   withGateLog([JSON.stringify({ action: 'fire', reason: 'x', ts: '2026-06-22T08:00:00Z' })], (logPath) => {
-    assert.equal(lastFinanceGateSkip(logPath), null);
+    assert.equal(lastDigestGateSkip(logPath), null);
   });
 });
 
-test('lastFinanceGateSkip: missing log file → null', () => {
-  assert.equal(lastFinanceGateSkip(path.join(tmpdir(), 'does-not-exist-finance-gate.jsonl')), null);
+test('lastDigestGateSkip: missing log file → null', () => {
+  assert.equal(lastDigestGateSkip(path.join(tmpdir(), 'does-not-exist-finance-gate.jsonl')), null);
 });
 
-test('lastFinanceGateSkip: a malformed line is skipped, earlier valid skip still found', () => {
+test('lastDigestGateSkip: a malformed line is skipped, earlier valid skip still found', () => {
   withGateLog(
     ['{ not json', JSON.stringify({ action: 'skip', reason: 'ok', ts: '2026-06-19T08:00:00Z' })],
     (logPath) => {
-      assert.equal(lastFinanceGateSkip(logPath)?.ts, '2026-06-19T08:00:00Z');
+      assert.equal(lastDigestGateSkip(logPath)?.ts, '2026-06-19T08:00:00Z');
     },
   );
 });
@@ -201,7 +203,7 @@ function item(over: Partial<NotifyItem> = {}): NotifyItem {
 }
 
 /** Build a v2 state with one period whose stored fingerprint we control. */
-function stateWith(items: Record<string, NotifyItem>, fingerprint: string | null): FinanceState {
+function stateWith(items: Record<string, NotifyItem>, fingerprint: string | null): LedgerState {
   return { version: 2, periods: { '2026-06': { notify: { fingerprint, items } } } };
 }
 
@@ -280,7 +282,7 @@ test('decideGate: null state fires (conservative)', () => {
 });
 
 test('decideGate: wrong version fires (conservative)', () => {
-  const d = decideGate({ version: 1, periods: {} } as FinanceState, 0, '2026-06-21', BACKSTOP_MS);
+  const d = decideGate({ version: 1, periods: {} } as LedgerState, 0, '2026-06-21', BACKSTOP_MS);
   assert.equal(d.action, 'fire');
   assert.match(d.reason, /version/);
 });
@@ -313,7 +315,7 @@ test('decideGate: SKIPS only when the fresh fingerprint matches the stored one',
 test('decideGate: any one period out of several forces a fire', () => {
   const today = '2026-06-21';
   const ok = { 'A|1|2026-06-25': item({ supplier: 'A', due_date: '2026-06-25' }) };
-  const state: FinanceState = {
+  const state: LedgerState = {
     version: 2,
     periods: {
       '2026-05': { notify: { fingerprint: computeFingerprint(ok, today)!, items: ok } },
@@ -323,9 +325,9 @@ test('decideGate: any one period out of several forces a fire', () => {
   assert.equal(decideGate(state, 0, today, BACKSTOP_MS).action, 'fire');
 });
 
-// ---- maybeEnqueueFinanceRun (integration) ------------------------------------
+// ---- maybeEnqueueDigest (integration) ------------------------------------
 
-function depsFor(state: FinanceState | null, log: GateLogEntry[]): GateDeps {
+function depsFor(state: LedgerState | null, log: GateLogEntry[]): GateDeps {
   return {
     readState: () => state,
     now: () => new Date('2026-06-21T08:00:00+02:00'),
@@ -333,12 +335,12 @@ function depsFor(state: FinanceState | null, log: GateLogEntry[]): GateDeps {
   };
 }
 
-test('maybeEnqueueFinanceRun: fires → enqueues finance/run and audits', () => {
+test('maybeEnqueueDigest: fires → enqueues finance/run and audits', () => {
   const db = freshDb();
   seedRecentSuccess(db);
   const log: GateLogEntry[] = [];
   const items = { 'Fortnox|450|2026-06-25': item() };
-  const decision = maybeEnqueueFinanceRun(db, depsFor(stateWith(items, 'stale'), log));
+  const decision = maybeEnqueueDigest(db, depsFor(stateWith(items, 'stale'), log));
 
   assert.equal(decision.action, 'fire');
   const pending = selectPendingFifo(db).filter((r) => r.agent === 'digest' && r.task === 'run');
@@ -348,38 +350,38 @@ test('maybeEnqueueFinanceRun: fires → enqueues finance/run and audits', () => 
   assert.equal(typeof log[0].ts, 'string');
 });
 
-test('maybeEnqueueFinanceRun: skips → enqueues nothing but still audits', () => {
+test('maybeEnqueueDigest: skips → enqueues nothing but still audits', () => {
   const db = freshDb();
   seedRecentSuccess(db);
   const log: GateLogEntry[] = [];
   const items = { 'Fortnox|450|2026-06-25': item() };
   const fp = computeFingerprint(items, '2026-06-21')!;
-  const decision = maybeEnqueueFinanceRun(db, depsFor(stateWith(items, fp), log));
+  const decision = maybeEnqueueDigest(db, depsFor(stateWith(items, fp), log));
 
   assert.equal(decision.action, 'skip');
   assert.equal(selectPendingFifo(db).length, 0);
   assert.equal(log[0].action, 'skip');
 });
 
-test('maybeEnqueueFinanceRun: never piles a second heartbeat on a queued/running one', () => {
+test('maybeEnqueueDigest: never piles a second heartbeat on a queued/running one', () => {
   const db = freshDb();
   seedRecentSuccess(db);
   const log: GateLogEntry[] = [];
   // First call fires and enqueues a run.
-  maybeEnqueueFinanceRun(db, depsFor(stateWith({ k: item() }, 'stale'), log));
+  maybeEnqueueDigest(db, depsFor(stateWith({ k: item() }, 'stale'), log));
   // Second call, same tick, must NOT add a duplicate even though it would otherwise fire.
-  const second = maybeEnqueueFinanceRun(db, depsFor(stateWith({ k: item() }, 'stale'), log));
+  const second = maybeEnqueueDigest(db, depsFor(stateWith({ k: item() }, 'stale'), log));
 
   assert.equal(second.action, 'skip');
   assert.match(second.reason, /already pending/);
   assert.equal(selectPendingFifo(db).filter((r) => r.agent === 'digest').length, 1);
 });
 
-test('maybeEnqueueFinanceRun: missing state.json fires (self-healing / conservative)', () => {
+test('maybeEnqueueDigest: missing state.json fires (self-healing / conservative)', () => {
   const db = freshDb();
   seedRecentSuccess(db);
   const log: GateLogEntry[] = [];
-  const decision = maybeEnqueueFinanceRun(db, depsFor(null, log));
+  const decision = maybeEnqueueDigest(db, depsFor(null, log));
   assert.equal(decision.action, 'fire');
 });
 
@@ -393,7 +395,7 @@ const ledgerDoc = (over: Partial<LedgerDocument> = {}): LedgerDocument => ({
 });
 
 test('projectNotifyItem: unpaid invoice → added to notify.items, fingerprint left STALE', () => {
-  const before: FinanceState = { version: 2, periods: { '2026-06': { export_status: 'pending', notify: { fingerprint: 'OLD', items: {} } } } };
+  const before: LedgerState = { version: 2, periods: { '2026-06': { export_status: 'pending', notify: { fingerprint: 'OLD', items: {} } } } };
   const after = projectNotifyItem(before, '2026-06', ledgerDoc(), '2026-06-25'); // due 06-30 → due_soon
   const items = after.periods!['2026-06'].notify!.items!;
   assert.ok(items['Avanza Pension|15352.00|2026-06-30']);
@@ -404,7 +406,7 @@ test('projectNotifyItem: unpaid invoice → added to notify.items, fingerprint l
 });
 
 test('projectNotifyItem: a kvitto (n/a) or a doc with no due date is not actionable → unchanged', () => {
-  const before: FinanceState = { version: 2, periods: {} };
+  const before: LedgerState = { version: 2, periods: {} };
   assert.equal(projectNotifyItem(before, '2026-06', ledgerDoc({ type: 'kvitto', paymentStatus: 'n/a' }), '2026-06-25'), before);
   assert.equal(projectNotifyItem(before, '2026-06', ledgerDoc({ dueDate: '' }), '2026-06-25'), before);
 });
@@ -416,7 +418,7 @@ test('projectNotifyItem: an overdue invoice gets bucket overdue; forces version 
 });
 
 test('markReconciled: sets export_status reconciled and drops paid items from notify', () => {
-  const before: FinanceState = { version: 2, periods: { '2026-05': { export_status: 'pending', notify: { fingerprint: 'X', items: { 'Elwa AB|2513.00|2026-05-14': { acknowledged: false, supplier: 'Elwa AB', amount: '2513.00', due_date: '2026-05-14' } } } } } };
+  const before: LedgerState = { version: 2, periods: { '2026-05': { export_status: 'pending', notify: { fingerprint: 'X', items: { 'Elwa AB|2513.00|2026-05-14': { acknowledged: false, supplier: 'Elwa AB', amount: '2513.00', due_date: '2026-05-14' } } } } } };
   const after = markReconciled(before, '2026-05', [{ supplier: 'Elwa AB', amount: '2513.00', dueDate: '2026-05-14' }]);
   assert.equal(after.periods!['2026-05'].export_status, 'reconciled');
   assert.equal(after.periods!['2026-05'].notify!.items!['Elwa AB|2513.00|2026-05-14'], undefined, 'paid item dropped');

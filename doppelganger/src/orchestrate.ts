@@ -4,7 +4,7 @@ import { config } from './config.ts';
 import { insertQueue, type Db } from './db.ts';
 import type { OutFile } from './types.ts';
 
-// Dispatch-and-await: the primitive a TS orchestrator (e.g. finance.ts) uses to run a judgment agent
+// Dispatch-and-await: the primitive a TS orchestrator (e.g. ledger-store.ts) uses to run a judgment agent
 // (classifier/reconciler/summarizer) for one task and read back its structured `result`. The daemon's
 // dispatcher loop is what actually picks + runs the queued row, so the await must NOT block the event
 // loop — it polls between `await sleep(...)` yields, letting the dispatcher tick in between.

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
-import { closeDraftPlan, runMonthClose } from '../src/adapters/finance-close.ts';
+import { closeDraftPlan, runMonthClose } from '../src/adapters/month-close.ts';
 import { emptyMonthState, renderStateMd, type GwsRunner, type GwsResult, type LedgerDocument, type MonthState } from '../src/adapters/state.ts';
 
 const okR = (stdout: string): GwsResult => ({ ok: true, stdout, detail: '' });

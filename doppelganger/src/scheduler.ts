@@ -2,7 +2,8 @@ import cron from 'node-cron';
 import { enqueue, jobs } from './adapters/schedule.ts';
 import { runHealthcheck } from './adapters/health.ts';
 import { ingestChat } from './adapters/chat.ts';
-import { maybeEnqueueFinanceRun, operatorToday, shadowValidateMonth } from './adapters/finance.ts';
+import { maybeEnqueueDigest } from './adapters/digest.ts';
+import { operatorToday, shadowValidateMonth } from './adapters/ledger-store.ts';
 import { pollBankDrop } from './adapters/reconcile.ts';
 import { sweepFinanceInbox } from './adapters/sweep.ts';
 import { bankStatementNudge } from './adapters/nudge.ts';
@@ -42,7 +43,7 @@ export function startScheduler(db: Db, channels: Map<string, Channel>): void {
       } catch (err) {
         console.error('[intake-sweep] failed:', err);
       }
-      maybeEnqueueFinanceRun(db); // gated enqueue — see finance.ts
+      maybeEnqueueDigest(db); // gated enqueue — see ledger-store.ts
       try {
         // step 2 shadow check (read-only): prove the TS ledger round-trips the live book
         const r = shadowValidateMonth(operatorToday().slice(0, 7));
@@ -57,10 +58,10 @@ export function startScheduler(db: Db, channels: Map<string, Channel>): void {
         console.error('[bank-nudge] failed:', err);
       }
     } catch (err) {
-      console.error('[scheduler] finance heartbeat gate failed:', err);
+      console.error('[scheduler] digest heartbeat gate failed:', err);
     }
   });
-  console.log(`[scheduler] finance heartbeat gate @ "${config.financeHeartbeatCron}"`);
+  console.log(`[scheduler] digest heartbeat gate @ "${config.financeHeartbeatCron}"`);
 
   cron.schedule(config.inboxPollCron, () => {
     try {

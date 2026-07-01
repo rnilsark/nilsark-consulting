@@ -14,9 +14,9 @@ import {
   DRIVE_FOLDER_MIME,
   findChildId,
   readDriveRootFolderId,
-  readFinanceSettings,
-  type FinanceSettings,
-} from './finance.ts';
+  readLedgerSettings,
+  type LedgerSettings,
+} from './ledger-store.ts';
 import { downloadDriveFileToPath } from './reconcile.ts';
 import {
   defaultGwsRunner,
@@ -61,7 +61,7 @@ export interface DraftSpec {
  * Which drafts a close would create, and to whom. Pure — the recipient gate (`draftTestMode`) and the
  * subject are deterministic. A type with no unsent rows is omitted entirely.
  */
-export function closeDraftPlan(state: MonthState, settings: FinanceSettings): DraftSpec[] {
+export function closeDraftPlan(state: MonthState, settings: LedgerSettings): DraftSpec[] {
   const testMode = settings.draftTestMode !== false; // default ON (safe): drafts go to the operator
   const specs: DraftSpec[] = [];
   for (const ct of CLOSE_TYPES) {
@@ -86,7 +86,7 @@ export interface CloseDeps {
   run?: GwsRunner;
   download?: DriveDownloader;
   rootFolderId?: () => string | null;
-  settings?: FinanceSettings;
+  settings?: LedgerSettings;
 }
 
 export interface CloseResult {
@@ -111,7 +111,7 @@ function createDraft(spec: DraftSpec, dir: string, names: string[], run: GwsRunn
 export function runMonthClose(month: string, deps: CloseDeps = {}): CloseResult {
   const run = deps.run ?? defaultGwsRunner;
   const download = deps.download ?? makeDriveDownloader(run);
-  const settings = deps.settings ?? readFinanceSettings();
+  const settings = deps.settings ?? readLedgerSettings();
   const rootId = (deps.rootFolderId ?? readDriveRootFolderId)();
   if (!rootId) return { closed: false, draftsCreated: 0, detail: 'no drive root folder id' };
   const monthId = findChildId(rootId, month, DRIVE_FOLDER_MIME, run);
