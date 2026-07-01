@@ -224,6 +224,29 @@ export function findChildId(parentId: string, name: string, mimeType: string | n
   }
 }
 
+/**
+ * Resolve a child folder by name, creating it if absent. Returns null only when a needed create
+ * fails. This is what lets the filing path scaffold a fresh month on demand instead of hard-failing
+ * on the 1st (the TS heartbeat otherwise never creates folders). findChildId orders by createdTime,
+ * so if a concurrent create ever races us the resolution stays deterministic (worst case: one empty
+ * duplicate folder, never a split).
+ */
+export function ensureChildFolder(parentId: string, name: string, run: GwsRunner): string | null {
+  const existing = findChildId(parentId, name, DRIVE_FOLDER_MIME, run);
+  if (existing) return existing;
+  const res = run([
+    'drive', 'files', 'create', '--json',
+    JSON.stringify({ name, mimeType: DRIVE_FOLDER_MIME, parents: [parentId] }),
+    '--format', 'json',
+  ]);
+  if (!res.ok) return null;
+  try {
+    return (JSON.parse(res.stdout) as { id?: string }).id ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export interface DriveStateDeps {
   run?: GwsRunner;
   download?: DriveDownloader;

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { insertEvent, openDb, type Db } from '../src/db.ts';
-import { documentFromClassification, fileDocument, intakeDocument, normalizeAmount } from '../src/adapters/intake.ts';
+import { documentFromClassification, fileDocument, intakeDocument, normalizeAmount, resolveWritableMonth } from '../src/adapters/intake.ts';
 import { emptyMonthState, renderStateMd, type GwsRunner, type GwsResult } from '../src/adapters/state.ts';
 
 const okR = (stdout: string): GwsResult => ({ ok: true, stdout, detail: '' });
@@ -179,14 +179,67 @@ test('fileDocument: a same-named file already in the folder is reused, never re-
   assert.ok(written.includes('EXISTINGPDF'), 'the existing id is stamped into the ledger');
 });
 
-test('fileDocument: a missing month folder → ok:false (never throws, no write)', () => {
-  const run: GwsRunner = (args) => {
-    if (args[2] === 'list') return okR(JSON.stringify({ files: [] })); // nothing resolves
-    throw new Error('should not reach upload/write');
+test('fileDocument: missing month/type/.doppelganger folders are scaffolded, then filing succeeds', () => {
+  const STATE_MD = renderStateMd(emptyMonthState('2026-08'));
+  const created: string[] = [];
+  let written = '';
+  const run: GwsRunner = (args, opts) => {
+    if (args[2] === 'list') return okR(JSON.stringify({ files: [] })); // nothing exists yet → create paths
+    if (args[2] === 'create') {
+      const j = JSON.parse(args[args.indexOf('--json') + 1] ?? '{}') as { name?: string };
+      created.push(j.name ?? '');
+      return okR(JSON.stringify({ id: `NEW_${j.name}` }));
+    }
+    if (args[1] === '+upload') {
+      if (args[args.indexOf('--name') + 1] === 'state.md') { written = readFileSync(path.join(opts!.cwd!, 'state.md'), 'utf8'); return okR(JSON.stringify({ id: 'SMID' })); }
+      return okR(JSON.stringify({ id: 'PDFID' }));
+    }
+    throw new Error(`unexpected: ${args.join(' ')}`);
   };
-  const doc = documentFromClassification('x.pdf', '2026-06', { type: 'kvitto', amount: '1,00' });
+  const doc = documentFromClassification('x.pdf', '2026-08', { type: 'kvitto', amount: '1,00', document_date: '2026-08-02' });
   const proc = { messageId: 'm', date: '', from: '', subject: '', attachmentFilename: 'x.pdf', status: 'classified' };
-  const r = fileDocument('2026-06', '/tmp/x.pdf', proc, doc, { run, rootFolderId: () => 'ROOT' });
-  assert.equal(r.ok, false);
-  assert.match(r.detail, /month folder/);
+  const r = fileDocument('2026-08', '/tmp/x.pdf', proc, doc, { run, rootFolderId: () => 'ROOT' });
+  assert.equal(r.ok, true, r.detail);
+  assert.deepEqual(created, ['2026-08', 'Verifikationer', '.doppelganger'], 'scaffolds month, type folder, .doppelganger');
+  assert.ok(written.includes('x.pdf'), 'the row was written into the (new) state.md');
+});
+
+// ---- resolveWritableMonth (closed/legacy fallback) --------------------------
+
+test('resolveWritableMonth: home month == current → used as-is, no Drive calls', () => {
+  const run: GwsRunner = () => { throw new Error('must not touch Drive'); };
+  assert.equal(resolveWritableMonth('2026-07', '2026-07', { run, rootFolderId: () => 'ROOT' }), '2026-07');
+});
+
+test('resolveWritableMonth: a fresh (non-existent) home month is used as-is (fileDocument scaffolds it)', () => {
+  const run: GwsRunner = (args) => {
+    if (args[2] === 'list') return okR(JSON.stringify({ files: [] })); // month folder not found
+    throw new Error(`unexpected: ${args.join(' ')}`);
+  };
+  assert.equal(resolveWritableMonth('2026-08', '2026-09', { run, rootFolderId: () => 'ROOT' }), '2026-08');
+});
+
+test('resolveWritableMonth: a legacy .nilsark home month diverts to the current month', () => {
+  const run: GwsRunner = (args) => {
+    const p = args[args.indexOf('--params') + 1] ?? '';
+    if (p.includes("name='2026-05'")) return okR(JSON.stringify({ files: [{ id: 'M5' }] }));
+    if (p.includes("name='.nilsark'")) return okR(JSON.stringify({ files: [{ id: 'NIL' }] }));
+    throw new Error(`unexpected: ${p}`);
+  };
+  assert.equal(resolveWritableMonth('2026-05', '2026-07', { run, rootFolderId: () => 'ROOT' }), '2026-07');
+});
+
+test('resolveWritableMonth: a closed .doppelganger home month diverts; an open one is kept', () => {
+  const mk = (closed: boolean): GwsRunner => (args) => {
+    const p = args[args.indexOf('--params') + 1] ?? '';
+    if (p.includes("name='2026-06'")) return okR(JSON.stringify({ files: [{ id: 'M6' }] }));
+    if (p.includes("name='.nilsark'")) return okR(JSON.stringify({ files: [] }));
+    if (p.includes("name='.doppelganger'")) return okR(JSON.stringify({ files: [{ id: 'DOPP' }] }));
+    if (p.includes('state.md')) return okR(JSON.stringify({ files: [{ id: 'SM', headRevisionId: 'R1' }] }));
+    throw new Error(`unexpected: ${p}`);
+  };
+  const closedMd = renderStateMd({ ...emptyMonthState('2026-06'), monthCloseSent: 'yes' });
+  const openMd = renderStateMd(emptyMonthState('2026-06'));
+  assert.equal(resolveWritableMonth('2026-06', '2026-07', { run: mk(true), download: () => closedMd, rootFolderId: () => 'ROOT' }), '2026-07');
+  assert.equal(resolveWritableMonth('2026-06', '2026-07', { run: mk(false), download: () => openMd, rootFolderId: () => 'ROOT' }), '2026-06');
 });

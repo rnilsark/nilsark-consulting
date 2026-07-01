@@ -3,6 +3,7 @@ import { dispatchAndAwait, type DispatchOptions } from '../orchestrate.ts';
 import type { Db } from '../db.ts';
 import {
   DRIVE_FOLDER_MIME,
+  ensureChildFolder,
   findChildId,
   operatorToday,
   projectNotifyItem,
@@ -181,17 +182,19 @@ export function fileDocument(
   const rootId = (deps.rootFolderId ?? readDriveRootFolderId)();
   if (!rootId) return { ok: false, detail: 'no drive root folder id' };
 
-  const monthId = findChildId(rootId, month, DRIVE_FOLDER_MIME, run);
-  if (!monthId) return { ok: false, detail: `month folder ${month} not found` };
+  // Scaffold on demand: create the month, type, and .doppelganger folders if they don't exist yet,
+  // so a new month (or a month someone only partially built) never hard-fails intake.
+  const monthId = ensureChildFolder(rootId, month, run);
+  if (!monthId) return { ok: false, detail: `could not resolve/create month folder ${month}` };
   const typeFolderName = document.drivePath.split('/').filter(Boolean).pop() ?? 'Verifikationer';
-  const typeFolderId = findChildId(monthId, typeFolderName, DRIVE_FOLDER_MIME, run);
-  if (!typeFolderId) return { ok: false, detail: `type folder ${typeFolderName} not found` };
+  const typeFolderId = ensureChildFolder(monthId, typeFolderName, run);
+  if (!typeFolderId) return { ok: false, detail: `could not resolve/create type folder ${typeFolderName}` };
 
   const up = uploadFile(typeFolderId, pdfPath, document.file, run);
   if (!up.ok) return { ok: false, detail: `upload failed: ${up.detail}` };
 
-  const doppId = findChildId(monthId, '.doppelganger', DRIVE_FOLDER_MIME, run);
-  if (!doppId) return { ok: false, detail: '.doppelganger folder not found' };
+  const doppId = ensureChildFolder(monthId, '.doppelganger', run);
+  if (!doppId) return { ok: false, detail: 'could not resolve/create .doppelganger folder' };
   const ref = resolveStateFile(doppId, run);
   const state = ref ? parseStateMd(download(ref.fileId)) : emptyMonthState(month);
   if (ref && state.month === '') return { ok: false, detail: 'state.md unreadable (corrupt download)' };
@@ -221,6 +224,32 @@ export interface RunIntakeResult {
 }
 
 /**
+ * The month to actually file into. A doc's home month is its document-date month — but if that month
+ * is already CLOSED (month-close sent) or LEGACY (a pre-migration `.nilsark` month the new writer can't
+ * own), we must not reopen it; book into the current processing month instead. A month that doesn't
+ * exist yet, or is a normal open `.doppelganger` month, is used as-is (fileDocument scaffolds it).
+ */
+export function resolveWritableMonth(homeMonth: string, currentMonth: string, filing: FilingDeps): string {
+  if (homeMonth === currentMonth) return homeMonth;
+  const run = filing.run ?? defaultGwsRunner;
+  const rootId = (filing.rootFolderId ?? readDriveRootFolderId)();
+  if (!rootId) return homeMonth;
+  const monthId = findChildId(rootId, homeMonth, DRIVE_FOLDER_MIME, run);
+  if (!monthId) return homeMonth; // fresh month → scaffold it, don't divert
+  if (findChildId(monthId, '.nilsark', DRIVE_FOLDER_MIME, run)) return currentMonth; // legacy month
+  const doppId = findChildId(monthId, '.doppelganger', DRIVE_FOLDER_MIME, run);
+  if (doppId) {
+    const ref = resolveStateFile(doppId, run);
+    if (ref) {
+      const download = filing.download ?? makeDriveDownloader(run);
+      const state = parseStateMd(download(ref.fileId));
+      if (state.monthCloseSent === 'yes') return currentMonth; // closed month
+    }
+  }
+  return homeMonth;
+}
+
+/**
  * The finance orchestrator's full intake of one document: classify (judgment agent) → normalize +
  * assemble the row (TS) → upload + merge into state.md (TS). This is what the inbox path calls (via the
  * `intake` worker) in place of a whole entrepreneur LLM run. A flagged classification still files the doc but marks the
@@ -237,8 +266,13 @@ export async function runIntake(
     return { status: 'classify-failed', detail: ir.detail, runId: ir.runId };
   }
   // File into the month the document's own date belongs to (a late-June invoice arriving in July
-  // lands in June), falling back to the caller's month when the date is unreadable.
-  const fileMonth = /^\d{4}-\d{2}/.test(ir.document.documentDate) ? ir.document.documentDate.slice(0, 7) : month;
+  // lands in June), falling back to the caller's month when the date is unreadable — then divert away
+  // from a closed/legacy month to the current one. Rewrite drive_path so the ledger names the month
+  // we actually file into (not the caller's month).
+  const homeMonth = /^\d{4}-\d{2}/.test(ir.document.documentDate) ? ir.document.documentDate.slice(0, 7) : month;
+  const fileMonth = resolveWritableMonth(homeMonth, operatorToday().slice(0, 7), deps.filing ?? {});
+  const typeFolder = ir.document.drivePath.split('/').filter(Boolean).pop() ?? 'Verifikationer';
+  ir.document = { ...ir.document, drivePath: `${fileMonth}/${typeFolder}/` };
   const processed: ProcessedMessage = {
     messageId: doc.messageId,
     date: doc.date,
