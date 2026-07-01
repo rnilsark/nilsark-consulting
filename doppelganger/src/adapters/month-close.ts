@@ -46,7 +46,9 @@ const CLOSE_TYPES: CloseType[] = [
 ];
 
 /** One per-type draft to create: the rows it covers, where to send it, and the subject. `skip` set
- *  with a reason means there's no valid recipient — the type is reported but no draft is attempted. */
+ *  with a reason means the draft can't be addressed (test mode with no myEmail) — reported, not
+ *  attempted, and it blocks the close. A type that's intentionally not handed off (empty recipient
+ *  config) is omitted from the plan entirely, not skipped. */
 export interface DraftSpec {
   type: string;
   folder: string;
@@ -59,7 +61,10 @@ export interface DraftSpec {
 
 /**
  * Which drafts a close would create, and to whom. Pure — the recipient gate (`draftTestMode`) and the
- * subject are deterministic. A type with no unsent rows is omitted entirely.
+ * subject are deterministic. `fortnoxEmail` decides WHICH types are handed off to the bookkeeper: an
+ * empty/missing entry means that type is intentionally not handed off (e.g. skattekonto) and is omitted
+ * entirely — no draft, and it must NOT block the close. `draftTestMode` only reroutes the handed-off
+ * types to the operator's own inbox (with a `[TEST]` subject). A type with no unsent rows is omitted too.
  */
 export function closeDraftPlan(state: MonthState, settings: LedgerSettings): DraftSpec[] {
   const testMode = settings.draftTestMode !== false; // default ON (safe): drafts go to the operator
@@ -67,14 +72,13 @@ export function closeDraftPlan(state: MonthState, settings: LedgerSettings): Dra
   for (const ct of CLOSE_TYPES) {
     const files = state.documents.filter((d) => d.type === ct.type && d.fortnoxSent === 'no');
     if (files.length === 0) continue;
-    let recipient = '';
+    const handoff = settings.fortnoxEmail?.[ct.key] ?? '';
+    if (!handoff) continue; // not handed off to Fortnox → no draft, doesn't block the close
+    let recipient = handoff;
     let skip: string | null = null;
     if (testMode) {
       recipient = settings.myEmail ?? '';
       if (!recipient) skip = 'no myEmail in settings';
-    } else {
-      recipient = settings.fortnoxEmail?.[ct.key] ?? '';
-      if (!recipient) skip = `no fortnoxEmail.${ct.key} configured`;
     }
     const subject = `${testMode ? '[TEST] ' : ''}Nilsark Consulting AB — ${ct.label} — ${state.month}`;
     specs.push({ type: ct.type, folder: ct.folder, label: ct.label, files, recipient, subject, skip });

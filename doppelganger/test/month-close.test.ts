@@ -20,25 +20,34 @@ function ms(documents: LedgerDocument[]): MonthState {
 // ---- closeDraftPlan (pure recipient/subject routing) ------------------------
 
 test('closeDraftPlan: test mode → drafts to myEmail with a [TEST] subject, only types with unsent rows', () => {
-  const specs = closeDraftPlan(ms([doc(), doc({ file: 'l.pdf', type: 'leverantörsfaktura', fortnoxSent: 'yes' })]), { draftTestMode: true, myEmail: 'me@x.se' });
+  const specs = closeDraftPlan(
+    ms([doc(), doc({ file: 'l.pdf', type: 'leverantörsfaktura', fortnoxSent: 'yes' })]),
+    { draftTestMode: true, myEmail: 'me@x.se', fortnoxEmail: { verifikation: 'v@bok.se' } },
+  );
   assert.equal(specs.length, 1); // only kvitto has unsent rows
-  assert.equal(specs[0].recipient, 'me@x.se');
+  assert.equal(specs[0].recipient, 'me@x.se'); // test mode reroutes the handed-off type to the operator
   assert.equal(specs[0].subject, '[TEST] Nilsark Consulting AB — kvitton — 2026-06');
   assert.equal(specs[0].skip, null);
 });
 
-test('closeDraftPlan: live mode routes by fortnoxEmail.*, and skips a type with no address', () => {
+test('closeDraftPlan: live mode routes by fortnoxEmail.*, and OMITS a type with no address (not handed off)', () => {
   const state = ms([doc(), doc({ file: 'l.pdf', type: 'leverantörsfaktura' })]);
   const specs = closeDraftPlan(state, { draftTestMode: false, fortnoxEmail: { verifikation: 'kvitto@bok.se' } });
   const kvitto = specs.find((s) => s.type === 'kvitto')!;
-  const lev = specs.find((s) => s.type === 'leverantörsfaktura')!;
   assert.equal(kvitto.recipient, 'kvitto@bok.se');
   assert.equal(kvitto.subject, 'Nilsark Consulting AB — kvitton — 2026-06');
-  assert.equal(lev.skip, 'no fortnoxEmail.leverantorsfaktura configured'); // no address → reported, not drafted
+  assert.equal(specs.find((s) => s.type === 'leverantörsfaktura'), undefined); // no address → omitted, not drafted
+});
+
+test('closeDraftPlan: an empty recipient omits the type (no draft) without blocking the close', () => {
+  const state = ms([doc(), doc({ file: 's.pdf', type: 'skattekonto', drivePath: '2026-06/Skattekonto/' })]);
+  const specs = closeDraftPlan(state, { draftTestMode: false, fortnoxEmail: { verifikation: 'v@bok.se', skattekonto: '' } });
+  assert.deepEqual(specs.map((s) => s.type), ['kvitto']); // skattekonto intentionally not handed off → omitted
+  assert.ok(specs.every((s) => s.skip === null)); // nothing left to block the close
 });
 
 test('closeDraftPlan: default (no draftTestMode set) is test mode — the safe default', () => {
-  const specs = closeDraftPlan(ms([doc()]), { myEmail: 'me@x.se' });
+  const specs = closeDraftPlan(ms([doc()]), { myEmail: 'me@x.se', fortnoxEmail: { verifikation: 'v@bok.se' } });
   assert.ok(specs[0].subject.startsWith('[TEST]'));
   assert.equal(specs[0].recipient, 'me@x.se');
 });
@@ -67,7 +76,7 @@ test('runMonthClose: drafts the kvitto batch, marks rows sent, sets Month-close 
     if (args[2] === 'update') { written = readFileSync(path.join(opts!.cwd!, 'state.md'), 'utf8'); return okR('{}'); }
     throw new Error(`unexpected: ${args.join(' ')}`);
   };
-  const r = runMonthClose('2026-06', { run, download: () => STATE_MD, rootFolderId: () => 'ROOT', settings: { draftTestMode: true, myEmail: 'me@x.se' } });
+  const r = runMonthClose('2026-06', { run, download: () => STATE_MD, rootFolderId: () => 'ROOT', settings: { draftTestMode: true, myEmail: 'me@x.se', fortnoxEmail: { verifikation: 'v@bok.se' } } });
   assert.equal(r.closed, true, r.detail);
   assert.equal(r.draftsCreated, 1);
   assert.equal(draftToldTo, 'me@x.se'); // test-mode recipient
