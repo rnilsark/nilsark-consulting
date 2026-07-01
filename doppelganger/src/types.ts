@@ -51,8 +51,23 @@ export interface Agent {
   kind?: AgentKind;
 }
 
+/**
+ * A duty the doppelgänger carries on the operator's behalf — a role the operator would otherwise do
+ * themselves (e.g. `entrepreneur`: running the company's books). A duty OWNS a cluster of agents.
+ * Agents that belong to no duty are harness-general (comms + ingress): they serve every duty and are
+ * part of none, though they may talk to a duty's agents.
+ */
+export interface Duty {
+  name: string;
+  /** One-line description of the real-world role this duty stands in for. */
+  summary: string;
+  /** The agents this duty owns (must exist in `agents`). */
+  agents: string[];
+}
+
 export interface Registry {
   agents: Record<string, Agent>;
+  duties: Record<string, Duty>;
 }
 
 /** Per-agent config surfaced to the dashboard: registry facts + on-disk settings.json. */

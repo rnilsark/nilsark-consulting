@@ -2,12 +2,17 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { loadRegistry } from '../src/registry.ts';
 
-// The credentialed `entrepreneur` LLM agent was dissolved — the finance heartbeat is now the
-// deterministic TS `digest` orchestrator, and collection rides the intake/statement path.
+// `entrepreneur` is a DUTY the doppelgänger carries (running the company's books), not a single agent:
+// it owns the finance pipeline (inbox/intake/classifier/statement/reconciler/digest). The heartbeat is
+// the deterministic TS `digest` orchestrator; collection rides the intake/statement path.
 
-test('registry: the entrepreneur agent is gone', () => {
+test('registry: entrepreneur is a duty owning the finance pipeline, not an agent', () => {
   const registry = loadRegistry();
-  assert.equal(registry.agents.entrepreneur, undefined);
+  assert.equal(registry.agents.entrepreneur, undefined); // not an agent
+  assert.deepEqual(
+    registry.duties.entrepreneur.agents,
+    ['inbox', 'intake', 'classifier', 'statement', 'reconciler', 'digest'],
+  );
 });
 
 test('registry: digest is a TS orchestrator (no model/tools) reachable from schedule + chat', () => {

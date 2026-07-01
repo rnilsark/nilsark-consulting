@@ -2,6 +2,19 @@
 # The dispatcher validates queue rows against this file; relevant parts
 # are injected into the agent's prompt. `tools` becomes --allowedTools and
 # `model` becomes --model for claude -p (omit model → CLI default).
+
+# The DUTIES the doppelgänger carries on the operator's behalf — each is a role the operator would
+# otherwise fill themselves. A duty OWNS a cluster of agents (the constellation renders each duty as a
+# star-formation). Agents NOT listed under any duty are harness-general — comms (triage, chat) and the
+# ingress sources — which serve every duty and belong to none, though they may talk to a duty's agents.
+duties:
+  entrepreneur:
+    summary: The business-owner duty — collect, classify, reconcile and report the company's finances.
+    agents: [inbox, intake, classifier, statement, reconciler, digest]
+  calendar:
+    summary: The scheduling duty — keep and answer the operator's calendar.
+    agents: [planner]
+
 agents:
   # Cheap, fast gate over incoming chat. Knows the harness's identity (call sign) and
   # capabilities; decides only whether a message is directed at the harness. Acts on nothing —

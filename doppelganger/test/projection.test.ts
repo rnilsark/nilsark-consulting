@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { CORE, project, windowSince } from '../src/projection.ts';
-import type { EventRow } from '../src/types.ts';
+import type { Duty, EventRow } from '../src/types.ts';
 
 let nextId = 0;
 
@@ -20,6 +20,19 @@ function ev(partial: Partial<EventRow>): EventRow {
     ...partial,
   };
 }
+
+test('duty clusters come from the registry; comms is harness-general; agent.cluster is set', () => {
+  const duties: Duty[] = [
+    { name: 'entrepreneur', summary: 'books', agents: ['digest', 'reconciler'] },
+  ];
+  const events = [ev({ run_id: 'R1', agent: 'digest', kind: 'finished', status: 'success' })];
+  const state = project(events, ['digest', 'reconciler', 'chat'], duties);
+
+  assert.equal(state.agents.find((a) => a.name === 'digest')!.cluster, 'entrepreneur');
+  assert.equal(state.agents.find((a) => a.name === 'chat')!.cluster, 'comms'); // harness-general, still clusters
+  const ent = state.clusters.find((c) => c.name === 'entrepreneur')!;
+  assert.deepEqual(ent.members.sort(), ['digest', 'reconciler']);
+});
 
 test('lone started → running agent, ACTIVE=1, active core spoke', () => {
   const events = [ev({ run_id: 'R1', kind: 'started' })];

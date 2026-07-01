@@ -3,7 +3,7 @@
 // (pulse), never guess "stale" via timeout. Shared types keep the FE payload from
 // drifting away from the DB contract.
 
-import type { EventKind, EventRow, RunStatus } from './types.ts';
+import type { Duty, EventKind, EventRow, RunStatus } from './types.ts';
 
 export type WindowKey = 'hour' | 'today' | 'live';
 
@@ -17,15 +17,20 @@ export type NodeKind = 'judgment' | 'orchestrator';
 /** Which agents are deterministic TS orchestrators (hubs), not LLM judgment stars. Mirrors registry.yaml `kind`. */
 const ORCHESTRATORS = new Set(['intake', 'statement', 'digest']);
 
-/** Domain groupings — the structural "star formations". Each becomes a cluster tethered to CORE via a hub. */
-export const DOMAINS: Array<{ name: string; members: string[] }> = [
-  // `entrepreneur` is an OFFLOADED sub-system — the dissolved entrepreneur agent, now six nodes. It's
-  // the one cluster drawn as a trunk-and-branch. `calendar`/`comms` are personal nodes wired direct.
-  { name: 'entrepreneur', members: ['inbox', 'intake', 'classifier', 'statement', 'reconciler', 'digest'] },
-  { name: 'calendar', members: ['planner'] },
+/**
+ * Harness-general clusters — NOT duties. `comms` (triage, chat) and ingress serve every duty and
+ * belong to none; they still cluster visually in the constellation. The DUTY clusters (entrepreneur,
+ * calendar, …) are not hardcoded here — they come from the registry's `duties` (the source of truth),
+ * threaded into `project`, so a duty is defined once and never drifts from a string in this file.
+ */
+const HARNESS_CLUSTERS: Array<{ name: string; members: string[] }> = [
   { name: 'comms', members: ['triage', 'chat'] },
 ];
-const domainOf = (name: string): string | null => DOMAINS.find((d) => d.members.includes(name))?.name ?? null;
+
+/** The full cluster set for a render: the registry's duty clusters + the harness-general ones. */
+function clusterGroups(duties: Duty[]): Array<{ name: string; members: string[] }> {
+  return [...duties.map((d) => ({ name: d.name, members: d.agents })), ...HARNESS_CLUSTERS];
+}
 
 export interface AgentState {
   name: string;
@@ -112,7 +117,10 @@ const round2 = (n: number): number => Math.round(n * 100) / 100;
 export function project(
   windowEvents: EventRow[],
   registryAgents: string[],
+  duties: Duty[] = [],
 ): DashboardState {
+  const groups = clusterGroups(duties);
+  const domainOf = (name: string): string | null => groups.find((g) => g.members.includes(name))?.name ?? null;
   const runs = foldRuns(windowEvents);
 
   // Node list is fully dynamic: registry ∪ agents seen in the window.
@@ -204,7 +212,7 @@ export function project(
     }));
 
   const present = new Set(names);
-  const clusters = DOMAINS.map((d) => ({ name: d.name, members: d.members.filter((m) => present.has(m)) })).filter((c) => c.members.length > 0);
+  const clusters = groups.map((g) => ({ name: g.name, members: g.members.filter((m) => present.has(m)) })).filter((c) => c.members.length > 0);
 
   return { agents, edges: [...edgeMap.values()], stats, feed, clusters };
 }

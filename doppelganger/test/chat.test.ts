@@ -26,6 +26,7 @@ const registry: Registry = {
     chat: { name: 'chat', can_be_called_by: ['triage'], tools: 'Read,Write', model: 'opus' },
     planner: { name: 'planner', can_be_called_by: ['schedule', 'chat'], tools: '', model: 'sonnet' },
   },
+  duties: {},
 };
 
 function freshDb() {

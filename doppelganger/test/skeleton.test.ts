@@ -10,6 +10,7 @@ const registry: Registry = {
     planner: { name: 'planner', can_be_called_by: ['schedule'], tools: '' },
     helper: { name: 'helper', can_be_called_by: ['planner'], tools: '' },
   },
+  duties: {},
 };
 
 function freshDb() {

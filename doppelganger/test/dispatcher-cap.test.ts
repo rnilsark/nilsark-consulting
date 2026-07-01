@@ -18,6 +18,7 @@ const registry: Registry = {
       tools: '',
     },
   },
+  duties: {},
 };
 
 function freshDb() {
