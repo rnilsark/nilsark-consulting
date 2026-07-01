@@ -218,23 +218,37 @@ export function readOutcome(outPath: string, cost: number | null, failure: strin
  * thing feel responsive — and it fires on every path into chat (triage escalation OR operator-DM
  * bypass). Kept in code, not the LLM — instant and free, no extra run. (pickAck takes an injectable
  * list, so these can move to per-agent settings later without touching call sites.)
- * Variety on purpose: terse, dry, and the occasional silly one, so it never reads like a robot.
+ * Variety on purpose: a mix of machine-status tickers ("Bearbetar…"), playful nonsense
+ * ("Rekombobulerar…"), and warm conversational ones ("Kikar på det!"), so it never gets stale.
  */
 export const CHAT_ACKS = [
-  'Japp, jag kollar.',
-  'Är på det.',
-  'Mottaget — återkommer strax.',
-  'Ett ögonblick, jag fixar det.',
-  'Jajamän, ger mig på det direkt.',
-  'Håll i hatten, jobbar på det. 🫡',
-  'Roger that.',
-  'På saken!',
-  'Mhm, låt mig kika.',
-  'Noterat, jag återkommer.',
-  'Lugn, jag löser det.',
-  'Ska bli — ge mig en sekund.',
-  'Tänker högt en stund, strax tillbaka.',
-  'Okej, gräver i det.',
+  'Bearbetar...',
+  'Analyserar indata...',
+  'Hämtar kontext...',
+  'Kalkylerar...',
+  'Exekverar...',
+  'Formulerar svar...',
+  'Mottaget. Initierar process...',
+  'Ansluter till synapserna...',
+  'Klurar...',
+  'Grundar...',
+  'Filosoferar...',
+  'Ruminerar...',
+  'Kombobulerar...',
+  'Rekombobulerar...',
+  'Skissar...',
+  'Kvantiserar...',
+  'Cerebrerar...',
+  'Hyperspacerar...',
+  'Navigerar...',
+  'Kikar på det!',
+  'Hajade! Ge mig en sekund...',
+  'Uppfattat. Sätter igång direkt...',
+  'Nu ska vi se här...',
+  'Ett ögonblick...',
+  'Mottaget och godkänt!',
+  'Då kollar vi på det...',
+  'Jag är på bollen!',
 ];
 
 export function pickAck(acks: string[] = CHAT_ACKS): string {
