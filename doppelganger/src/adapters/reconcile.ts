@@ -78,6 +78,45 @@ function normReason(raw: string): string {
   return r;
 }
 
+/** First supplier word ≥3 chars, lowercased — the token to look for in a bank description. '' if none. */
+function supplierToken(supplier: string): string {
+  return supplier.toLowerCase().split(/[^a-zåäö0-9]+/).find((t) => t.length >= 3) ?? '';
+}
+
+/**
+ * Is this outgoing bank row covered by a filed kvitto? A card charge settles a receipt, not an invoice,
+ * so the reconciler never matches it — but the receipt IS in the ledger. Match on |amount| (±1 kr) OR
+ * the supplier's name appearing in the payee text (catches foreign-currency receipts where the SEK
+ * charge ≠ the receipt's amount, e.g. an 18 EUR Anthropic receipt vs a -204 SEK charge).
+ */
+function coveredByKvitto(row: BankTransaction, kvitton: Array<{ supplier: string; amount: string }>): boolean {
+  const amt = Math.abs(Number(normalizeAmount(row.amount)));
+  const desc = row.description.toLowerCase();
+  return kvitton.some((k) => {
+    const ka = Math.abs(Number(normalizeAmount(k.amount)));
+    if (Number.isFinite(ka) && Number.isFinite(amt) && ka > 0 && Math.abs(ka - amt) <= 1) return true;
+    const tok = supplierToken(k.supplier);
+    return tok.length >= 3 && desc.includes(tok);
+  });
+}
+
+/**
+ * The reason an unmatched outgoing row is expected — to sort "väntat" from "att kolla". Strongest
+ * evidence first: a filed receipt covers it (kvitto), then the reconciler's own tag, then a couple of
+ * unambiguous description patterns (salary/fee/tax) so a month reconciled before reason-tagging still
+ * categorizes. Only genuinely unexplained rows fall through to 'okänd'.
+ */
+function inferReason(row: BankTransaction, kvitton: Array<{ supplier: string; amount: string }>): string {
+  if (coveredByKvitto(row, kvitton)) return 'kvitto';
+  const tagged = normReason(row.unmatchedReason);
+  if (tagged !== 'okänd') return tagged;
+  const d = row.description.toLowerCase();
+  if (/\blön\b|^lon\b/.test(d)) return 'lön';
+  if (/avgift/.test(d)) return 'avgift';
+  if (/skatteverket/.test(d)) return 'skatt';
+  return 'okänd';
+}
+
 /** Format a signed amount string as `-2 513 kr` (space thousands, no decimals). Deterministic (no ICU). */
 function kr(amount: string): string {
   const n = Number(normalizeAmount(amount));
@@ -102,8 +141,10 @@ export function composeReconcileSummary(state: MonthState): string {
   const unmatchedOut = outgoing.filter((b) => !(SETTLED_CONFIDENCE.has(b.matchConfidence) && b.matchedToFile));
   const incoming = bank.filter((b) => Number(normalizeAmount(b.amount)) > 0);
 
-  const expected = unmatchedOut.filter((b) => EXPECTED_UNMATCHED.has(normReason(b.unmatchedReason)));
-  const toCheck = unmatchedOut.filter((b) => !EXPECTED_UNMATCHED.has(normReason(b.unmatchedReason)));
+  const kvitton = state.documents.filter((d) => d.type === 'kvitto');
+  const reasonOf = new Map(unmatchedOut.map((b) => [b, inferReason(b, kvitton)] as const));
+  const expected = unmatchedOut.filter((b) => EXPECTED_UNMATCHED.has(reasonOf.get(b)!));
+  const toCheck = unmatchedOut.filter((b) => !EXPECTED_UNMATCHED.has(reasonOf.get(b)!));
 
   const lines: string[] = [`Avstämning ${state.month} (kontoutdrag)`, ''];
 
@@ -118,7 +159,7 @@ export function composeReconcileSummary(state: MonthState): string {
   lines.push(`Omatchade utgående (${unmatchedOut.length}):`);
   if (expected.length) {
     const byReason = new Map<string, number>();
-    for (const b of expected) byReason.set(normReason(b.unmatchedReason), (byReason.get(normReason(b.unmatchedReason)) ?? 0) + 1);
+    for (const b of expected) byReason.set(reasonOf.get(b)!, (byReason.get(reasonOf.get(b)!) ?? 0) + 1);
     const parts = [...byReason.entries()].sort((a, b) => b[1] - a[1]).map(([r, n]) => `${r} ${n}`);
     lines.push(`  Väntat (${expected.length}): ${parts.join(' · ')}`);
   }

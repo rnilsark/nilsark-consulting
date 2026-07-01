@@ -150,6 +150,28 @@ test('composeReconcileSummary: splits expected noise from the rows that need a l
   assert.match(s, /Inkommande: 1 rad/);
 });
 
+test('composeReconcileSummary: a filed kvitto covers its card charge (by amount or name), incl. foreign currency', () => {
+  const kvitto = (file: string, supplier: string, amount: string, currency = 'SEK'): LedgerDocument =>
+    ({ file, type: 'kvitto', supplier, amount, currency, dueDate: '', documentDate: '2026-06-05', ocrNumber: '', bankAccount: '', vatAmount: '0', drivePath: '', driveFileId: '', paymentStatus: 'n/a', fortnoxSent: 'no' });
+  const s = composeReconcileSummary({
+    ...emptyMonthState('2026-06'),
+    documents: [
+      kvitto('apple.pdf', 'Apple', '129.00'),
+      kvitto('anthropic.pdf', 'Anthropic, PBC', '18.00', 'EUR'),   // 18 EUR receipt vs -204 SEK charge
+    ],
+    bank: [
+      bank({ description: 'APPLE.COM/BILL', amount: '-129.00' }),   // amount match
+      bank({ description: 'ANTHROPIC* CLA', amount: '-203.77' }),   // name match (amount differs, EUR)
+      bank({ description: 'LÖN', amount: '-36400.00' }),            // heuristic → lön
+      bank({ description: 'KF', amount: '-20000.00' }),             // genuinely unexplained
+    ],
+  });
+  assert.match(s, /Väntat \(3\): kvitto 2 · lön 1/);   // both receipts credited, salary tagged
+  assert.match(s, /Att kolla \(1\):/);                  // only KF left for the operator
+  assert.match(s, /KF/);
+  assert.doesNotMatch(s, /Att kolla[\s\S]*ANTHROPIC/);  // the receipt-covered row is NOT flagged
+});
+
 test('composeReconcileSummary: a fully-matched month says nothing needs a look', () => {
   const s = composeReconcileSummary({
     ...emptyMonthState('2026-06'),
