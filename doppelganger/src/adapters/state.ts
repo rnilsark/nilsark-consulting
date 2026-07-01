@@ -51,6 +51,8 @@ export interface BankTransaction {
   currency: string;
   matchedToFile: string;
   matchConfidence: string;
+  /** For an unmatched row, the reconciler's best guess at what it is (kvitto/lön/avgift/skatt/inkommande/okänd). '' for matched rows or legacy state.md. */
+  unmatchedReason: string;
 }
 
 /**
@@ -71,7 +73,7 @@ const DOCUMENT_HEADERS = [
   'file', 'type', 'supplier', 'amount', 'currency', 'due_date', 'document_date',
   'ocr_number', 'bank_account', 'vat_amount', 'drive_path', 'drive_file_id', 'payment_status', 'fortnox_sent',
 ];
-const BANK_HEADERS = ['date', 'description', 'amount', 'currency', 'matched_to_file', 'match_confidence'];
+const BANK_HEADERS = ['date', 'description', 'amount', 'currency', 'matched_to_file', 'match_confidence', 'unmatched_reason'];
 
 /** An empty month, used as the first-run template. */
 export function emptyMonthState(month: string): MonthState {
@@ -224,7 +226,7 @@ export function parseStateMd(md: string): MonthState {
     paymentStatus: c[12], fortnoxSent: c[13],
   }));
   const bank = parseTable(secs.get('Bank Statement Transactions') ?? [], BANK_HEADERS).map((c) => ({
-    date: c[0], description: c[1], amount: c[2], currency: c[3], matchedToFile: c[4], matchConfidence: c[5],
+    date: c[0], description: c[1], amount: c[2], currency: c[3], matchedToFile: c[4], matchConfidence: c[5], unmatchedReason: c[6],
   }));
 
   const summary = secs.get('Month Summary') ?? [];
@@ -291,7 +293,7 @@ export function renderStateMd(state: MonthState): string {
     d.file, d.type, d.supplier, d.amount, d.currency, d.dueDate, d.documentDate, d.ocrNumber,
     d.bankAccount, d.vatAmount, d.drivePath, d.driveFileId, d.paymentStatus, d.fortnoxSent,
   ]);
-  const bankRows = state.bank.map((b) => [b.date, b.description, b.amount, b.currency, b.matchedToFile, b.matchConfidence]);
+  const bankRows = state.bank.map((b) => [b.date, b.description, b.amount, b.currency, b.matchedToFile, b.matchConfidence, b.unmatchedReason]);
 
   return [
     `# State: ${state.month}`,

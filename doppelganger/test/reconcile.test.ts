@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { insertEvent, openDb, type Db } from '../src/db.ts';
-import { pollBankDrop, runReconcile } from '../src/adapters/reconcile.ts';
-import { emptyMonthState, renderStateMd, type GwsRunner, type GwsResult, type LedgerDocument } from '../src/adapters/state.ts';
+import { applyLedgerCorrection, composeReconcileSummary, financeLedgerSnapshot, pollBankDrop, reviewReconcile, runReconcile } from '../src/adapters/reconcile.ts';
+import { emptyMonthState, renderStateMd, type BankTransaction, type GwsRunner, type GwsResult, type LedgerDocument, type MonthState } from '../src/adapters/state.ts';
 
 const okR = (stdout: string): GwsResult => ({ ok: true, stdout, detail: '' });
 
@@ -110,4 +110,147 @@ test('runReconcile: a June statement reconciles JUNE (read off its dates), not p
   assert.match(r.detail, /2026-06/);            // period detected as June
   assert.match(juneWritten, /Faktura_A\.pdf \|[^\n]*\| paid \|/); // June invoice marked paid
   assert.equal(mayWritten, '');                 // May NEVER touched — the old prevMonth assumption is gone
+  assert.ok(r.summary && /Avstämning 2026-06/.test(r.summary)); // the run now carries an operator-facing breakdown
+});
+
+// ---- composeReconcileSummary: the reviewable breakdown ------------------------
+
+function bank(over: Partial<BankTransaction>): BankTransaction {
+  return { date: '2026-06-10', description: '', amount: '-100.00', currency: 'SEK', matchedToFile: '', matchConfidence: 'unmatched', unmatchedReason: '', ...over };
+}
+
+function reconciledJune(): MonthState {
+  return {
+    ...emptyMonthState('2026-06'),
+    documents: [
+      lev('A.pdf', 'Elwa', '2513.00', '2026-06-14'),        // will be paid
+      { ...lev('B.pdf', 'Telia', '349.00', '2026-06-20'), paymentStatus: 'unpaid' }, // still unpaid
+    ].map((d) => (d.file === 'A.pdf' ? { ...d, paymentStatus: 'paid' } : d)),
+    bank: [
+      bank({ description: 'ELWA AB', amount: '-2513.00', matchedToFile: 'A.pdf', matchConfidence: 'exact' }),
+      bank({ description: 'ICA', amount: '-432.00', unmatchedReason: 'kvitto' }),
+      bank({ description: 'OKQ8', amount: '-701.00', unmatchedReason: 'kvitto' }),
+      bank({ description: 'LÖN', amount: '-30000.00', unmatchedReason: 'lön' }),
+      bank({ description: 'GLESYS', amount: '-1200.00', unmatchedReason: '' }),  // untagged → okänd → to check
+      bank({ description: 'KUND AB', amount: '+45000.00', unmatchedReason: 'inkommande' }),
+    ],
+  };
+}
+
+test('composeReconcileSummary: splits expected noise from the rows that need a look', () => {
+  const s = composeReconcileSummary(reconciledJune());
+  assert.match(s, /Fakturor: 1\/2 betalda/);
+  assert.match(s, /Kvar att matcha \(1\):/);
+  assert.match(s, /- Telia — 349 kr — förf 2026-06-20/);
+  assert.match(s, /1 matchade mot faktura/);            // only the exact ELWA row settled
+  assert.match(s, /Omatchade utgående \(4\):/);          // 2 kvitto + 1 lön + 1 okänd (incoming excluded)
+  assert.match(s, /Väntat \(3\): kvitto 2 · lön 1/);     // expected bucket, most-common first
+  assert.match(s, /Att kolla \(1\):/);
+  assert.match(s, /GLESYS/);                             // the untagged row surfaces for review
+  assert.match(s, /Inkommande: 1 rad/);
+});
+
+test('composeReconcileSummary: a fully-matched month says nothing needs a look', () => {
+  const s = composeReconcileSummary({
+    ...emptyMonthState('2026-06'),
+    documents: [{ ...lev('A.pdf', 'Elwa', '2513.00', '2026-06-14'), paymentStatus: 'paid' }],
+    bank: [bank({ amount: '-2513.00', matchedToFile: 'A.pdf', matchConfidence: 'exact' })],
+  });
+  assert.match(s, /Fakturor: 1\/1 betalda/);
+  assert.doesNotMatch(s, /Kvar att matcha/);
+  assert.match(s, /Omatchade utgående \(0\):\n {2}\(inga\)/);
+});
+
+test('reviewReconcile: reads the month with bank rows and composes its summary', () => {
+  const juneMd = renderStateMd(reconciledJune());
+  const run: GwsRunner = (args) => {
+    const p = args[args.indexOf('--params') + 1] ?? '';
+    if (p.includes("name='2026-07'")) return okR(JSON.stringify({ files: [] }));   // this month not created
+    if (p.includes("name='2026-06'")) return okR(JSON.stringify({ files: [{ id: 'M6' }] }));
+    if (p.includes('.doppelganger') && p.includes("'M6'")) return okR(JSON.stringify({ files: [{ id: 'DOPP6' }] }));
+    if (p.includes('state.md') && p.includes("'DOPP6'")) return okR(JSON.stringify({ files: [{ id: 'SM6', headRevisionId: 'R6' }] }));
+    return okR(JSON.stringify({ files: [] }));
+  };
+  const rv = reviewReconcile(undefined, { filing: { run, download: () => juneMd, rootFolderId: () => 'ROOT' }, today: '2026-07-03' });
+  assert.ok(rv);
+  assert.equal(rv!.month, '2026-06');                    // fell back from empty July to reconciled June
+  assert.match(rv!.summary, /Avstämning 2026-06/);
+});
+
+// ---- ledger read + correct (the chat explain/correct loop) --------------------
+
+/** A June ledger with the two real correction cases: Walley-paid invoice + mis-dated skattekonto. */
+function juneToCorrect(): MonthState {
+  return {
+    ...emptyMonthState('2026-06'),
+    documents: [
+      { ...lev('Verktygsboden.pdf', 'Verktygsboden Erfilux AB', '655.00', '2026-07-05'), paymentStatus: 'unpaid' },
+      { ...lev('Skatt.pdf', 'Skatteverket', '47183.00', '2026-06-12'), type: 'skattekonto', paymentStatus: 'overdue' },
+    ],
+    bank: [
+      bank({ date: '2026-06-26', description: 'Walley', amount: '-655.00' }),
+      bank({ date: '2026-06-10', description: 'SKATTEVERKET', amount: '-47245.00' }),
+    ],
+  };
+}
+
+/** Mock a single Drive month (June present, July empty) that serves `md` and captures the written state.md. */
+function mockMonth(md: string) {
+  const cap = { written: '' };
+  const run: GwsRunner = (args, opts) => {
+    const p = args[args.indexOf('--params') + 1] ?? '';
+    if (args[2] === 'list') {
+      if (p.includes("name='2026-07'")) return okR(JSON.stringify({ files: [] }));
+      if (p.includes("name='2026-06'")) return okR(JSON.stringify({ files: [{ id: 'M6' }] }));
+      if (p.includes('.doppelganger') && p.includes("'M6'")) return okR(JSON.stringify({ files: [{ id: 'DOPP6' }] }));
+      if (p.includes('state.md') && p.includes("'DOPP6'")) return okR(JSON.stringify({ files: [{ id: 'SM6', headRevisionId: 'R6' }] }));
+      return okR(JSON.stringify({ files: [] }));
+    }
+    if (args[2] === 'get' && p.includes('headRevisionId')) return okR(JSON.stringify({ headRevisionId: 'R6' }));
+    if (args[2] === 'update') { cap.written = readFileSync(path.join(opts!.cwd!, args[args.indexOf('--upload') + 1]), 'utf8'); return okR('{}'); }
+    throw new Error(`unexpected: ${args.join(' ')}`);
+  };
+  return { run, download: () => md, cap };
+}
+
+test('applyLedgerCorrection: mark paid + manually link a bank row (Verktygsboden = Walley)', () => {
+  const m = mockMonth(renderStateMd(juneToCorrect()));
+  const r = applyLedgerCorrection(
+    { file: 'Verktygsboden.pdf', setPaid: true, linkBankDescription: 'Walley' },
+    { filing: { run: m.run, download: m.download, rootFolderId: () => 'ROOT' }, today: '2026-07-03' },
+  );
+  assert.ok(r.ok);
+  assert.equal(r.month, '2026-06');
+  assert.match(m.cap.written, /Verktygsboden\.pdf \|[^\n]*\| paid \| no \|/);           // invoice now paid
+  assert.match(m.cap.written, /Walley \| -655\.00 \| SEK \| Verktygsboden\.pdf \| manual \|/); // bank row linked
+});
+
+test('applyLedgerCorrection: fix a mis-parsed due date by supplier (Skatteverket → July)', () => {
+  const m = mockMonth(renderStateMd(juneToCorrect()));
+  const r = applyLedgerCorrection(
+    { supplier: 'Skatteverket', dueDate: '2026-07-12' },
+    { filing: { run: m.run, download: m.download, rootFolderId: () => 'ROOT' }, today: '2026-07-03' },
+  );
+  assert.ok(r.ok);
+  assert.match(r.detail, /2026-07-12/);
+  assert.match(m.cap.written, /Skatt\.pdf \| skattekonto \| Skatteverket \| 47183\.00 \| SEK \| 2026-07-12 \|/);
+});
+
+test('applyLedgerCorrection: no matching document → ok:false, writes nothing', () => {
+  const m = mockMonth(renderStateMd(juneToCorrect()));
+  const r = applyLedgerCorrection(
+    { supplier: 'Obefintlig', setPaid: true },
+    { filing: { run: m.run, download: m.download, rootFolderId: () => 'ROOT' }, today: '2026-07-03' },
+  );
+  assert.equal(r.ok, false);
+  assert.equal(m.cap.written, '');
+});
+
+test('financeLedgerSnapshot: renders the open month for the chat LLM to explain', () => {
+  const m = mockMonth(renderStateMd(juneToCorrect()));
+  const snap = financeLedgerSnapshot({ filing: { run: m.run, download: m.download, rootFolderId: () => 'ROOT' }, today: '2026-07-03' });
+  assert.ok(snap);
+  assert.match(snap!, /### 2026-06/);
+  assert.match(snap!, /\[unpaid\] Verktygsboden/);
+  assert.match(snap!, /Omatchat utgående:.*Walley -655\.00/);
 });

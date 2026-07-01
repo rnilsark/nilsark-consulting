@@ -34,7 +34,18 @@ local disk. **Read** it.
      payee/description. (Flag-worthy, but still report it.)
    - **prior-month** — matches a carry-over invoice from an earlier month.
    - **unmatched** — matches nothing (salary, owner transfer, fee, or a missing invoice).
-4. Return the result. Do **not** touch Drive, Gmail, or state. **No orders, no replies, no payments** —
+4. For every **unmatched** row, add `unmatched_reason` — your best guess at what it is, so the operator
+   can tell expected noise from a real gap. One of:
+   - `kvitto` — a card payment / auto-charge (a receipt, not an invoice: known payee like a shop, fuel,
+     SaaS, App Store, transport).
+   - `lön` — salary / payroll to a person.
+   - `avgift` — a bank fee, interest, or similar small charge.
+   - `skatt` — a payment to Skatteverket / tax account.
+   - `inkommande` — an incoming payment (amount > 0), e.g. a customer paying you.
+   - `okänd` — you genuinely can't tell, OR it looks like it *should* match an invoice but doesn't. These
+     are the only rows worth the operator's attention, so don't over-use the other tags — when unsure, `okänd`.
+   Matched rows: leave `unmatched_reason` as `""`.
+5. Return the result. Do **not** touch Drive, Gmail, or state. **No orders, no replies, no payments** —
    you never message the operator; the orchestrator decides what (if anything) to report.
 
 ## Output
@@ -48,7 +59,7 @@ Write `out.json` with the transactions in `result`:
   "result": {
     "period": "2026-06",
     "transactions": [
-      { "date": "2026-06-14", "description": "<Referens>", "amount": "-2513.00", "currency": "SEK", "matched_to_file": "Faktura_2908.pdf", "match_confidence": "exact" }
+      { "date": "2026-06-14", "description": "<Referens>", "amount": "-2513.00", "currency": "SEK", "matched_to_file": "Faktura_2908.pdf", "match_confidence": "exact", "unmatched_reason": "" }
     ]
   }
 }
@@ -59,6 +70,8 @@ Write `out.json` with the transactions in `result`:
   reconcile; read it off the statement, never guess.
 - `amount` is signed and normalized (dot-decimal). `matched_to_file` is the invoice's `file` (or `""`
   when unmatched). `match_confidence` is one of `exact` | `fuzzy` | `prior-month` | `unmatched`.
+  `unmatched_reason` is one of `kvitto` | `lön` | `avgift` | `skatt` | `inkommande` | `okänd` for an
+  unmatched row, else `""`.
 - A single payment that clears multiple invoices, or anything ambiguous → leave it `unmatched` and say
   so in `summary` (the operator reviews). Never guess a match you aren't sure of.
 - `status` is `flagged` if some transactions were ambiguous, `error` only if the file couldn't be read.

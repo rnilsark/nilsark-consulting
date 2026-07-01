@@ -16,11 +16,11 @@ import {
 import { agentsDir, callableBy, loadRegistry } from './registry.ts';
 import { loadAgentContext, loadAgentSettings, loadSoul } from './settings.ts';
 import { downloadAttachment } from './adapters/inbox.ts';
-import { operatorToday } from './adapters/finance.ts';
+import { operatorToday } from './adapters/ledger-store.ts';
 import { runIntake } from './adapters/intake.ts';
-import { downloadDriveFileToPath, runReconcile } from './adapters/reconcile.ts';
-import { ackPayment, applyFinanceRollup } from './adapters/finance-rollup.ts';
-import { FINANCE_RUN_TASK } from './adapters/finance.ts';
+import { applyLedgerCorrection, downloadDriveFileToPath, financeLedgerSnapshot, reviewReconcile, runReconcile } from './adapters/reconcile.ts';
+import { ackPayment, runDigest } from './adapters/digest.ts';
+import { DIGEST_RUN_TASK } from './adapters/ledger-store.ts';
 import type { Order, OutFile, QueueRow, Registry, Reply, RunStatus } from './types.ts';
 
 export interface Outcome {
@@ -118,6 +118,19 @@ export function buildPrompt(row: QueueRow, outPath: string, registry: Registry, 
         `[worker] run=${row.run_id} agent=${row.agent}: operatorNumber set but no direct-message ` +
           `thread resolved — this push has no target and will deliver nothing.`,
       );
+    }
+  }
+
+  // Ledger context for chat: give the chat LLM a read-only view of the open months' books so it can
+  // EXPLAIN them and reason about a correction. Gated to the operator's own thread (never a family/
+  // untrusted conversation) — the operator's finances are theirs to see; a stranger's chat is not.
+  // Best-effort: a Drive miss just omits it, never blocks the reply. chat still holds no credentials —
+  // this is injected data + delegation, the write goes through the `digest` correct order.
+  if (row.agent === 'chat' && db && conversationId && config.operatorNumber) {
+    const target = operatorPushTarget(db, config.operatorNumber);
+    if (target && target.conversationId === conversationId) {
+      const snapshot = financeLedgerSnapshot();
+      if (snapshot) lines.push(``, `## Ledger (open months — read-only)`, snapshot);
     }
   }
 
@@ -372,6 +385,7 @@ async function runReconcileAgent(db: Db, row: QueueRow, runDir: string, outPath:
     return { status: 'error', summary: 'statement: task was not JSON', orders: [], cost: null };
   }
   const lines: string[] = [];
+  const summaries: string[] = []; // the operator-facing reconciliation breakdowns to push
 
   // Drive-drop source: one statement uploaded straight to Drive.
   if (task.driveFileId && task.filename) {
@@ -379,6 +393,7 @@ async function runReconcileAgent(db: Db, row: QueueRow, runDir: string, outPath:
     if (downloadDriveFileToPath(task.driveFileId, filePath)) {
       const r = await runReconcile(db, { filePath, filename: task.filename }, { dispatch: { parent: row.run_id } });
       lines.push(`${task.filename}: ${r.status} — ${r.detail}`);
+      if (r.summary) summaries.push(r.summary);
     } else {
       lines.push(`${task.filename}: drive download failed`);
     }
@@ -391,7 +406,17 @@ async function runReconcileAgent(db: Db, row: QueueRow, runDir: string, outPath:
     if (!downloadAttachment(task.messageId ?? '', att.attachmentId, filePath)) { lines.push(`${att.filename}: download failed`); continue; }
     const r = await runReconcile(db, { filePath, filename: att.filename }, { dispatch: { parent: row.run_id } });
     lines.push(`${att.filename}: ${r.status} — ${r.detail}`);
+    if (r.summary) summaries.push(r.summary);
   }
+
+  // Push the breakdown to the operator's own thread — a reconcile has no conversation of its own, so it
+  // can't rely on routeReplies. This is the ONLY thing that told us reconcile ran; without it the run
+  // was silent (the finance push only fires on PAY-set changes, which reconcile doesn't touch).
+  if (summaries.length && config.operatorNumber) {
+    const target = operatorPushTarget(db, config.operatorNumber);
+    if (target) insertOutbox(db, { channel: target.channel, conversation_id: target.conversationId, text: summaries.join('\n\n') });
+  }
+
   const failed = lines.filter((l) => l.includes('failed') || l.includes('download failed')).length;
   const status: RunStatus = lines.length === 0 ? 'flagged' : failed === 0 ? 'success' : failed === lines.length ? 'error' : 'flagged';
   const summary = `statement: ${lines.join(' | ') || 'no statement attachment'}`;
@@ -408,13 +433,31 @@ async function runReconcileAgent(db: Db, row: QueueRow, runDir: string, outPath:
  * included so the worker's routeReplies delivers them, scoped to this run's own conversation).
  */
 function runFinanceAgent(db: Db, row: QueueRow, outPath: string): Outcome {
-  interface FinanceTask { mode?: string; supplier?: string; conversationId?: string }
+  interface FinanceTask {
+    mode?: string; supplier?: string; month?: string; conversationId?: string;
+    file?: string; setPaid?: boolean; dueDate?: string; linkBankDescription?: string;
+  }
   let task: FinanceTask | null = null;
-  if (row.task !== FINANCE_RUN_TASK) { try { task = JSON.parse(row.task) as FinanceTask; } catch { task = null; } }
+  if (row.task !== DIGEST_RUN_TASK) { try { task = JSON.parse(row.task) as FinanceTask; } catch { task = null; } }
 
   let summary: string;
   let replies: Reply[] = [];
-  if (task?.mode === 'ack') {
+  if (task?.mode === 'correct') {
+    const r = applyLedgerCorrection({
+      month: task.month, file: task.file, supplier: task.supplier,
+      setPaid: task.setPaid, dueDate: task.dueDate, linkBankDescription: task.linkBankDescription,
+    });
+    const text = r.ok
+      ? `Klart — ${r.file ?? task.supplier ?? ''} (${r.month ?? ''}): ${r.detail}.`
+      : `Kunde inte rätta: ${r.detail}.`;
+    summary = `correct ${r.file ?? task.supplier ?? '?'}: ${r.ok ? r.detail : 'miss'}`;
+    if (task.conversationId) replies = [{ conversationId: task.conversationId, text }];
+  } else if (task?.mode === 'review') {
+    const rv = reviewReconcile(task.month);
+    const text = rv ? rv.summary : 'Hittade inget avstämt kontoutdrag att visa än.';
+    summary = `review ${rv?.month ?? task.month ?? '?'}: ${rv ? 'ok' : 'none'}`;
+    if (task.conversationId) replies = [{ conversationId: task.conversationId, text }];
+  } else if (task?.mode === 'ack') {
     const { matched } = ackPayment(task.supplier ?? '');
     const text = matched > 0
       ? `Noterat — markerat ${task.supplier} som betald. Undertrycks tills kontoutdraget bekräftar.`
@@ -422,7 +465,7 @@ function runFinanceAgent(db: Db, row: QueueRow, outPath: string): Outcome {
     summary = `ack ${task.supplier ?? ''}: ${matched} matchad`;
     if (task.conversationId) replies = [{ conversationId: task.conversationId, text }];
   } else {
-    const r = applyFinanceRollup(db);
+    const r = runDigest(db);
     summary = `digest: ${r.detail}`;
     if (task?.conversationId) replies = [{ conversationId: task.conversationId, text: `Ekonomi uppdaterad (${r.detail}). Se din todo.` }];
   }

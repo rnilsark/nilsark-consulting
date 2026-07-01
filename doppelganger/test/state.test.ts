@@ -213,7 +213,7 @@ test('mergeDocument: re-merging the same document is idempotent (no duplicates)'
 // ---- applyReconciliation ----------------------------------------------------
 
 const bankTxn = (over: Partial<MonthState['bank'][number]> = {}): MonthState['bank'][number] => ({
-  date: '2026-06-20', description: 'Betalning', amount: '-2513.00', currency: 'SEK', matchedToFile: '', matchConfidence: 'unmatched', ...over,
+  date: '2026-06-20', description: 'Betalning', amount: '-2513.00', currency: 'SEK', matchedToFile: '', matchConfidence: 'unmatched', unmatchedReason: '', ...over,
 });
 
 test('applyReconciliation: an exact match marks the invoice paid and records the transaction', () => {
@@ -256,8 +256,8 @@ test('renderStateMd: empty month renders the pinned canonical bytes', () => {
     '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|',
     '',
     '## Bank Statement Transactions',
-    '| date | description | amount | currency | matched_to_file | match_confidence |',
-    '|---|---|---|---|---|---|',
+    '| date | description | amount | currency | matched_to_file | match_confidence | unmatched_reason |',
+    '|---|---|---|---|---|---|---|',
     '',
     '## Month Summary',
     '- Documents processed: 0',
@@ -307,12 +307,14 @@ test('parseStateMd: an over-long row drops the overflow cells', () => {
   const md = [
     '# State: 2026-09',
     '## Bank Statement Transactions',
-    '| date | description | amount | currency | matched_to_file | match_confidence |',
-    '|---|---|---|---|---|---|',
-    '| 2026-09-01 | x | 1 | SEK | f.pdf | exact | EXTRA | JUNK |',
+    '| date | description | amount | currency | matched_to_file | match_confidence | unmatched_reason |',
+    '|---|---|---|---|---|---|---|',
+    '| 2026-09-01 | x | 1 | SEK | f.pdf | exact | | JUNK |',
   ].join('\n');
   const b = parseStateMd(md).bank[0];
-  assert.equal(b.matchConfidence, 'exact'); // 6th column; extras ignored
+  assert.equal(b.matchConfidence, 'exact');
+  assert.equal(b.unmatchedReason, ''); // 7th column
+  // (the trailing JUNK cell is the overflow — dropped)
 });
 
 test('render+parse: a value containing a pipe or newline is sanitized in the view', () => {
