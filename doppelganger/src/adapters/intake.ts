@@ -140,8 +140,14 @@ export interface FilingResult {
   detail: string;
 }
 
-/** Upload a local file to a Drive folder via the verified cwd-relative `+upload`. Returns its id. */
+/**
+ * Upload a local file to a Drive folder via the verified cwd-relative `+upload`. Returns its id.
+ * Idempotent: `+upload` always CREATES a new file, so a re-file (retry, sweep re-processing) would
+ * duplicate. If a file with this name already sits in the folder, reuse its id instead of uploading.
+ */
 function uploadFile(folderId: string, localPath: string, name: string, run: GwsRunner): { ok: boolean; fileId: string; detail: string } {
+  const existing = findChildId(folderId, name, null, run);
+  if (existing) return { ok: true, fileId: existing, detail: 'reused existing upload' };
   const res = run(
     ['drive', '+upload', path.basename(localPath), '--parent', folderId, '--name', name, '--format', 'json'],
     { cwd: path.dirname(localPath) },

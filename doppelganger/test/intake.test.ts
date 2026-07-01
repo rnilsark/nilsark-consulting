@@ -116,6 +116,7 @@ test('fileDocument: uploads the PDF and writes the normalized row into state.md'
       if (p.includes("name='Leverantörsfakturor'")) return okR(JSON.stringify({ files: [{ id: 'TYPE' }] }));
       if (p.includes('.doppelganger')) return okR(JSON.stringify({ files: [{ id: 'DOPP' }] }));
       if (p.includes('state.md')) return okR(JSON.stringify({ files: [{ id: 'SM', headRevisionId: 'R1' }] }));
+      if (p.includes("name='Faktura_2908.pdf'")) return okR(JSON.stringify({ files: [] })); // not yet uploaded → +upload path
       throw new Error(`unexpected list: ${p}`);
     }
     if (args[1] === '+upload') return okR(JSON.stringify({ id: 'PDFID' }));
@@ -141,6 +142,41 @@ test('fileDocument: uploads the PDF and writes the normalized row into state.md'
   assert.ok(written.includes('Elwa AB'), 'supplier in the written ledger');
   assert.ok(written.includes('2513.00'), 'NORMALIZED amount in the written ledger');
   assert.ok(written.includes('PDFID'), 'drive_file_id stamped from the upload');
+});
+
+test('fileDocument: a same-named file already in the folder is reused, never re-uploaded (no dup)', () => {
+  const STATE_MD = renderStateMd(emptyMonthState('2026-06'));
+  let written = '';
+  let uploads = 0;
+  const run: GwsRunner = (args, opts) => {
+    if (args[2] === 'list') {
+      const p = args[args.indexOf('--params') + 1] ?? '';
+      if (p.includes("name='2026-06'")) return okR(JSON.stringify({ files: [{ id: 'MONTH' }] }));
+      if (p.includes("name='Leverantörsfakturor'")) return okR(JSON.stringify({ files: [{ id: 'TYPE' }] }));
+      if (p.includes("name='Faktura_2908.pdf'")) return okR(JSON.stringify({ files: [{ id: 'EXISTINGPDF' }] })); // already uploaded
+      if (p.includes('.doppelganger')) return okR(JSON.stringify({ files: [{ id: 'DOPP' }] }));
+      if (p.includes('state.md')) return okR(JSON.stringify({ files: [{ id: 'SM', headRevisionId: 'R1' }] }));
+      throw new Error(`unexpected list: ${p}`);
+    }
+    if (args[1] === '+upload') { uploads += 1; return okR(JSON.stringify({ id: 'NEWPDF' })); }
+    if (args[2] === 'get') {
+      const p = args[args.indexOf('--params') + 1] ?? '';
+      if (p.includes('headRevisionId')) return okR(JSON.stringify({ headRevisionId: 'R1' }));
+      if (args.includes('-o')) { writeFileSync(path.join(opts!.cwd!, 'download'), STATE_MD); return okR(''); }
+    }
+    if (args[2] === 'update') { written = readFileSync(path.join(opts!.cwd!, 'state.md'), 'utf8'); return okR('{}'); }
+    throw new Error(`unexpected: ${args.join(' ')}`);
+  };
+
+  const doc = documentFromClassification('Faktura_2908.pdf', '2026-06', { type: 'leverantörsfaktura', supplier: 'Elwa AB', amount: '2 513,00', document_date: '2026-06-04' });
+  const proc = { messageId: 'm9', date: '2026-06-04', from: 'Elwa', subject: 'Faktura 2908', attachmentFilename: 'Faktura_2908.pdf', status: 'classified' };
+
+  const r = fileDocument('2026-06', '/tmp/x/Faktura_2908.pdf', proc, doc, { run, rootFolderId: () => 'ROOT' });
+
+  assert.equal(r.ok, true, r.detail);
+  assert.equal(uploads, 0, '+upload must NOT be called when the file already exists');
+  assert.equal(r.driveFileId, 'EXISTINGPDF', 'reuses the existing file id, not a new upload');
+  assert.ok(written.includes('EXISTINGPDF'), 'the existing id is stamped into the ledger');
 });
 
 test('fileDocument: a missing month folder → ok:false (never throws, no write)', () => {

@@ -212,7 +212,9 @@ export function readDriveRootFolderId(settingsPath: string = FINANCE_SETTINGS_PA
 export function findChildId(parentId: string, name: string, mimeType: string | null, run: GwsRunner): string | null {
   const clauses = [`name='${name}'`, `'${parentId}' in parents`, 'trashed=false'];
   if (mimeType) clauses.push(`mimeType='${mimeType}'`);
-  const params = JSON.stringify({ q: clauses.join(' and '), fields: 'files(id)' });
+  // orderBy makes resolution deterministic: if a duplicate name ever exists (a create race that
+  // slipped past a list-before-create), always resolve to the same one so filing never splits.
+  const params = JSON.stringify({ q: clauses.join(' and '), fields: 'files(id)', orderBy: 'createdTime' });
   const res = run(['drive', 'files', 'list', '--params', params, '--format', 'json']);
   if (!res.ok) return null;
   try {
