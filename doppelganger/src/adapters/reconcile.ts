@@ -118,11 +118,14 @@ export async function runReconcile(
   }
   if (ctx.size === 0) return { status: 'failed', detail: 'no open month with a state.md', matched: 0 };
 
+  // The reconciler reads a whole PDF statement and matches every open invoice against it — the
+  // slowest judgment run by far (multiple minutes). The default 180s await times out mid-run and
+  // throws the (already-computed) result away, so give it real headroom. A caller can still override.
   const r = await dispatchAndAwait(
     db,
     'reconciler',
     JSON.stringify({ statementPath: statement.filePath, filename: statement.filename, invoices }),
-    deps.dispatch,
+    { timeoutMs: 600_000, ...deps.dispatch },
   );
   if (r.state !== 'done' || (r.status !== 'success' && r.status !== 'flagged') || !r.result) {
     return { status: 'failed', detail: `reconciler ${r.state}/${r.status ?? '?'}`, matched: 0, runId: r.runId };
