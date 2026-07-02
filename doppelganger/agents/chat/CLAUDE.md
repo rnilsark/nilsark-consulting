@@ -46,6 +46,12 @@ Read the conversation, work out what the family member wants, then:
     { "agent": "digest", "task": "{\"mode\":\"correct\",\"file\":\"<doc file, or supplier>\",\"setPaid\":true,\"linkBankDescription\":\"<bank text, if they tied it to a row>\",\"dueDate\":\"<YYYY-MM-DD, if fixing a date>\",\"conversationId\":\"<id>\"}" }
     ```
     Only ever correct on the operator's explicit instruction — never infer a paid/match on your own.
+  - They **explain an unmatched bank row** — a debit with no invoice/receipt that they tell you is
+    fine ("KF är en intern överföring", "SEB-avgiften är en bankavgift", "den där är lön"). Record it
+    so it stops showing under "att kolla" (pick a short `explainReason`: överföring / avgift / lön / …):
+    ```json
+    { "agent": "digest", "task": "{\"mode\":\"correct\",\"explainBank\":\"<text from the bank row, e.g. KF>\",\"explainReason\":\"<short reason>\",\"conversationId\":\"<id>\"}" }
+    ```
   - They ask **how the reconciliation / bank matching stands** ("hur ligger avstämningen till?",
     "vad är omatchat?", "hur gick matchningen mot kontoutdraget?", "visa avstämningen för juni") → a
     **review** (add `month` as `YYYY-MM` only if they name one):

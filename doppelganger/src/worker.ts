@@ -436,6 +436,7 @@ function runFinanceAgent(db: Db, row: QueueRow, outPath: string): Outcome {
   interface FinanceTask {
     mode?: string; supplier?: string; month?: string; conversationId?: string;
     file?: string; setPaid?: boolean; dueDate?: string; linkBankDescription?: string;
+    explainBank?: string; explainReason?: string;
   }
   let task: FinanceTask | null = null;
   if (row.task !== DIGEST_RUN_TASK) { try { task = JSON.parse(row.task) as FinanceTask; } catch { task = null; } }
@@ -446,11 +447,13 @@ function runFinanceAgent(db: Db, row: QueueRow, outPath: string): Outcome {
     const r = applyLedgerCorrection({
       month: task.month, file: task.file, supplier: task.supplier,
       setPaid: task.setPaid, dueDate: task.dueDate, linkBankDescription: task.linkBankDescription,
+      explainBank: task.explainBank, explainReason: task.explainReason,
     });
+    const label = r.file ?? task.supplier ?? task.explainBank ?? '?';
     const text = r.ok
-      ? `Klart — ${r.file ?? task.supplier ?? ''} (${r.month ?? ''}): ${r.detail}.`
+      ? `Klart — ${label} (${r.month ?? ''}): ${r.detail}.`
       : `Kunde inte rätta: ${r.detail}.`;
-    summary = `correct ${r.file ?? task.supplier ?? '?'}: ${r.ok ? r.detail : 'miss'}`;
+    summary = `correct ${label}: ${r.ok ? r.detail : 'miss'}`;
     if (task.conversationId) replies = [{ conversationId: task.conversationId, text }];
   } else if (task?.mode === 'review') {
     const rv = reviewReconcile(task.month);

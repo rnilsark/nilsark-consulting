@@ -67,8 +67,8 @@ const SETTLED_CONFIDENCE = new Set(['exact', 'fuzzy', 'prior-month', 'manual']);
 // check". Only the `okänd`/untagged rows are real work.
 
 const TRACKED_TYPES = new Set(['leverantörsfaktura', 'skattekonto']);
-/** Unmatched reasons that are expected forever and never settle an invoice — not gaps to chase. */
-const EXPECTED_UNMATCHED = new Set(['kvitto', 'lön', 'avgift', 'skatt', 'inkommande']);
+/** A short reference to a document, for matching a bank row against filed underlag. */
+type DocRef = { supplier: string; amount: string };
 
 /** Canonicalize a reconciler reason tag; blank/unknown → 'okänd' (the needs-a-look bucket). */
 function normReason(raw: string): string {
@@ -89,12 +89,16 @@ function supplierToken(supplier: string): string {
  * the supplier's name appearing in the payee text (catches foreign-currency receipts where the SEK
  * charge ≠ the receipt's amount, e.g. an 18 EUR Anthropic receipt vs a -204 SEK charge).
  */
-function coveredByKvitto(row: BankTransaction, kvitton: Array<{ supplier: string; amount: string }>): boolean {
+function coveredBy(row: BankTransaction, docs: DocRef[], nameOnly = false): boolean {
   const amt = Math.abs(Number(normalizeAmount(row.amount)));
   const desc = row.description.toLowerCase();
-  return kvitton.some((k) => {
-    const ka = Math.abs(Number(normalizeAmount(k.amount)));
-    if (Number.isFinite(ka) && Number.isFinite(amt) && ka > 0 && Math.abs(ka - amt) <= 1) return true;
+  return docs.some((k) => {
+    // Same-month: an amount match is strong (the receipt IS this charge). Cross-month: require a name
+    // match — a coincidental round-number amount from last month shouldn't silently absorb a real gap.
+    if (!nameOnly) {
+      const ka = Math.abs(Number(normalizeAmount(k.amount)));
+      if (Number.isFinite(ka) && Number.isFinite(amt) && ka > 0 && Math.abs(ka - amt) <= 1) return true;
+    }
     const tok = supplierToken(k.supplier);
     return tok.length >= 3 && desc.includes(tok);
   });
@@ -102,14 +106,16 @@ function coveredByKvitto(row: BankTransaction, kvitton: Array<{ supplier: string
 
 /**
  * The reason an unmatched outgoing row is expected — to sort "väntat" from "att kolla". Strongest
- * evidence first: a filed receipt covers it (kvitto), then the reconciler's own tag, then a couple of
- * unambiguous description patterns (salary/fee/tax) so a month reconciled before reason-tagging still
- * categorizes. Only genuinely unexplained rows fall through to 'okänd'.
+ * evidence first: a filed receipt in THIS month covers it (kvitto); a document in the PRIOR month
+ * covers it (förra mån — a cross-month payment whose underlag was already booked + sent last month,
+ * e.g. Google); then the reconciler's own tag or an operator explanation; then a couple of unambiguous
+ * description patterns (salary/fee/tax). Only genuinely unexplained rows fall through to 'okänd'.
  */
-function inferReason(row: BankTransaction, kvitton: Array<{ supplier: string; amount: string }>): string {
-  if (coveredByKvitto(row, kvitton)) return 'kvitto';
+function inferReason(row: BankTransaction, kvitton: DocRef[], priorDocs: DocRef[]): string {
+  if (coveredBy(row, kvitton)) return 'kvitto';
+  if (coveredBy(row, priorDocs, true)) return 'förra mån';
   const tagged = normReason(row.unmatchedReason);
-  if (tagged !== 'okänd') return tagged;
+  if (tagged !== 'okänd') return tagged; // reconciler tag OR an operator-supplied explanation
   const d = row.description.toLowerCase();
   if (/\blön\b|^lon\b/.test(d)) return 'lön';
   if (/avgift/.test(d)) return 'avgift';
@@ -130,7 +136,7 @@ function kr(amount: string): string {
  * (paid / total tracked), the still-unpaid invoices, and the unmatched bank rows split into "väntat"
  * (expected, grouped by reason) vs "att kolla" (okänd/untagged — the only real work). Pure.
  */
-export function composeReconcileSummary(state: MonthState): string {
+export function composeReconcileSummary(state: MonthState, opts: { priorDocs?: DocRef[] } = {}): string {
   const tracked = state.documents.filter((d) => TRACKED_TYPES.has(d.type));
   const paid = tracked.filter((d) => d.paymentStatus === 'paid');
   const unpaid = tracked.filter((d) => d.paymentStatus === 'unpaid' || d.paymentStatus === 'overdue');
@@ -142,9 +148,12 @@ export function composeReconcileSummary(state: MonthState): string {
   const incoming = bank.filter((b) => Number(normalizeAmount(b.amount)) > 0);
 
   const kvitton = state.documents.filter((d) => d.type === 'kvitto');
-  const reasonOf = new Map(unmatchedOut.map((b) => [b, inferReason(b, kvitton)] as const));
-  const expected = unmatchedOut.filter((b) => EXPECTED_UNMATCHED.has(reasonOf.get(b)!));
-  const toCheck = unmatchedOut.filter((b) => !EXPECTED_UNMATCHED.has(reasonOf.get(b)!));
+  const priorDocs = opts.priorDocs ?? [];
+  const reasonOf = new Map(unmatchedOut.map((b) => [b, inferReason(b, kvitton, priorDocs)] as const));
+  // Expected = anything with a reason (receipt, prior-month, reconciler tag, or an operator explanation);
+  // only 'okänd' rows are real work.
+  const expected = unmatchedOut.filter((b) => reasonOf.get(b) !== 'okänd');
+  const toCheck = unmatchedOut.filter((b) => reasonOf.get(b) === 'okänd');
 
   const lines: string[] = [`Avstämning ${state.month} (kontoutdrag)`, ''];
 
@@ -290,7 +299,7 @@ export async function runReconcile(
     status: matched > 0 ? 'reconciled' : 'no-matches',
     detail: `${period}: matched ${matched} invoice(s) across ${transactions.length} txns${touched.size > 1 ? ` (${touched.size} months)` : ''}`,
     matched,
-    summary: periodState ? composeReconcileSummary(periodState) : undefined,
+    summary: periodState ? composeReconcileSummary(periodState, { priorDocs: loadMonthDocuments(prevMonth(period), rootId, run, download) }) : undefined,
     runId: r.runId,
   };
 }
@@ -329,7 +338,8 @@ export function reviewReconcile(
   }
   if (loaded.length === 0) return null;
   const chosen = loaded.find((s) => s.bank.length > 0) ?? loaded[0];
-  return { month: chosen.month, summary: composeReconcileSummary(chosen) };
+  const priorDocs = loadMonthDocuments(prevMonth(chosen.month), rootId, run, download);
+  return { month: chosen.month, summary: composeReconcileSummary(chosen, { priorDocs }) };
 }
 
 // ---- ledger read + write for chat (explain + correct) -------------------------
@@ -349,6 +359,21 @@ function loadMonthRef(
   if (!ref) return null;
   const state = parseStateMd(download(ref.fileId));
   return state.month === '' ? null : { state, doppId, ref };
+}
+
+/**
+ * A month's documents as `{supplier, amount}` refs, for cross-month payment matching. Tries the
+ * `.doppelganger` ledger, then the legacy `.nilsark` one (both hold a `state.md` in the same format),
+ * so a June payment can be recognized against a receipt booked in a legacy May. Read-only; [] on a miss.
+ */
+function loadMonthDocuments(month: string, rootId: string, run: GwsRunner, download: (id: string) => string): DocRef[] {
+  const monthId = findChildId(rootId, month, DRIVE_FOLDER_MIME, run);
+  if (!monthId) return [];
+  const holderId = findChildId(monthId, '.doppelganger', DRIVE_FOLDER_MIME, run) ?? findChildId(monthId, '.nilsark', DRIVE_FOLDER_MIME, run);
+  if (!holderId) return [];
+  const ref = resolveStateFile(holderId, run);
+  if (!ref) return [];
+  return parseStateMd(download(ref.fileId)).documents.map((d) => ({ supplier: d.supplier, amount: d.amount }));
 }
 
 /**
@@ -407,6 +432,11 @@ export interface LedgerCorrection {
   dueDate?: string;
   /** link the bank row whose description contains this text to the doc (confidence `manual`). */
   linkBankDescription?: string;
+  /** mark the unmatched bank row(s) whose description contains this text as explained — moves them out
+   *  of "att kolla" into "väntat". No document needed (e.g. "KF är en intern överföring"). */
+  explainBank?: string;
+  /** the short reason to tag an explained bank row with (e.g. 'överföring'). Defaults to 'förklarad'. */
+  explainReason?: string;
 }
 
 export interface CorrectionResult {
@@ -428,11 +458,33 @@ export function applyLedgerCorrection(c: LedgerCorrection, deps: { filing?: Fili
   const download = deps.filing?.download ?? makeDriveDownloader(run);
   const rootId = (deps.filing?.rootFolderId ?? readDriveRootFolderId)();
   if (!rootId) return { ok: false, detail: 'no drive root folder id' };
-  if (!c.file && !c.supplier) return { ok: false, detail: 'need a file or supplier to correct' };
+  if (!c.file && !c.supplier && !c.explainBank) return { ok: false, detail: 'need a file, supplier, or bank row to correct' };
 
   const today = deps.today ?? operatorToday();
   const months = c.month ? [c.month] : [today.slice(0, 7), prevMonth(today)];
   const needle = c.supplier?.trim().toLowerCase() ?? '';
+
+  // Pure bank-row explanation (no document target): tag the matching unmatched row(s) with the reason,
+  // so an operator's "that -20 000 is an internal transfer" sticks and the row stops nagging.
+  if (c.explainBank && !c.file && !c.supplier) {
+    const bneedle = c.explainBank.trim().toLowerCase();
+    const reason = (c.explainReason ?? 'förklarad').trim().toLowerCase() || 'förklarad';
+    for (const m of months) {
+      const loaded = loadMonthRef(m, rootId, run, download);
+      if (!loaded) continue;
+      let n = 0;
+      const bank = loaded.state.bank.map((b) => {
+        const settled = SETTLED_CONFIDENCE.has(b.matchConfidence) && b.matchedToFile;
+        if (!settled && b.description.toLowerCase().includes(bneedle)) { n++; return { ...b, unmatchedReason: reason }; }
+        return b;
+      });
+      if (n === 0) continue;
+      const w = writeMonthState({ ...loaded.state, bank }, loaded.doppId, loaded.ref, run);
+      if (!w.ok) return { ok: false, month: m, detail: `state write ${w.reason}` };
+      return { ok: true, month: m, detail: `${n} bankrad(er) markerade: ${reason}` };
+    }
+    return { ok: false, detail: `hittade ingen omatchad bankrad för "${c.explainBank}"` };
+  }
 
   for (const m of months) {
     const loaded = loadMonthRef(m, rootId, run, download);

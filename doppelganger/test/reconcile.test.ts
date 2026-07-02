@@ -172,6 +172,31 @@ test('composeReconcileSummary: a filed kvitto covers its card charge (by amount 
   assert.doesNotMatch(s, /Att kolla[\s\S]*ANTHROPIC/);  // the receipt-covered row is NOT flagged
 });
 
+test('composeReconcileSummary: a payment covered by a PRIOR-month doc shows as väntat (förra mån)', () => {
+  const s = composeReconcileSummary(
+    {
+      ...emptyMonthState('2026-06'),
+      bank: [bank({ description: 'GOOGLE*WORKSPA', amount: '-75.00' }), bank({ description: 'KF', amount: '-20000.00' })],
+    },
+    { priorDocs: [{ supplier: 'Google Cloud EMEA Limited (Workspace)', amount: '6.80' }] }, // last month's receipt (EUR)
+  );
+  assert.match(s, /Väntat \(1\): förra mån 1/);   // the Google charge is credited to May's booked receipt
+  assert.match(s, /Att kolla \(1\):/);
+  assert.match(s, /KF/);
+});
+
+test('applyLedgerCorrection: explain an unmatched bank row (no document) tags its reason', () => {
+  const st = { ...emptyMonthState('2026-06'), bank: [bank({ description: 'KF', amount: '-20000.00' })] };
+  const m = mockMonth(renderStateMd(st));
+  const r = applyLedgerCorrection(
+    { explainBank: 'KF', explainReason: 'överföring' },
+    { filing: { run: m.run, download: m.download, rootFolderId: () => 'ROOT' }, today: '2026-07-03' },
+  );
+  assert.ok(r.ok);
+  assert.equal(r.month, '2026-06');
+  assert.match(m.cap.written, /KF \| -20000\.00 \| SEK \|  \| unmatched \| överföring \|/);
+});
+
 test('composeReconcileSummary: a fully-matched month says nothing needs a look', () => {
   const s = composeReconcileSummary({
     ...emptyMonthState('2026-06'),
