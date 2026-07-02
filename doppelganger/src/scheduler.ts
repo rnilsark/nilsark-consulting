@@ -6,7 +6,7 @@ import { maybeEnqueueDigest } from './adapters/digest.ts';
 import { operatorToday, shadowValidateMonth } from './adapters/ledger-store.ts';
 import { pollBankDrop } from './adapters/reconcile.ts';
 import { sweepFinanceInbox } from './adapters/sweep.ts';
-import { bankStatementNudge } from './adapters/nudge.ts';
+import { bankStatementNudge, monthCloseNudge } from './adapters/nudge.ts';
 import { ingestInbox } from './adapters/inbox.ts';
 import { config } from './config.ts';
 import type { Db } from './db.ts';
@@ -56,6 +56,12 @@ export function startScheduler(db: Db, channels: Map<string, Channel>): void {
         if (n.nudged) console.log(`[bank-nudge] ${n.detail}`);
       } catch (err) {
         console.error('[bank-nudge] failed:', err);
+      }
+      try {
+        const c = monthCloseNudge(db); // last month reconciled but not closed → prompt to "stäng"
+        if (c.nudged) console.log(`[close-nudge] ${c.detail}`);
+      } catch (err) {
+        console.error('[close-nudge] failed:', err);
       }
     } catch (err) {
       console.error('[scheduler] digest heartbeat gate failed:', err);

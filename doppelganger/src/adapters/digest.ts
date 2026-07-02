@@ -19,16 +19,13 @@ import {
   findChildId,
   operatorToday,
   readDriveRootFolderId,
-  readLedgerSettings,
   readLedgerState,
   writeLedgerState,
   type LedgerStoreDeps,
-  type LedgerSettings,
   type LedgerState,
   type NotifyItem,
 } from './ledger-store.ts';
 import { normalizeAmount } from './intake.ts';
-import { runMonthClose } from './month-close.ts';
 import {
   defaultGwsRunner,
   makeDriveDownloader,
@@ -370,22 +367,22 @@ function uploadTodo(rootId: string, today: string, content: string, run: GwsRunn
 export interface ApplyResult {
   periods: number;
   pushed: boolean;
-  closed: string | null;
   detail: string;
 }
 
 /**
  * The live heartbeat run (what the `digest` worker executes): gather the rollup, then WRITE —
  * persist each period's overdue marks to state.md, write notify.items + fingerprint to state.json,
- * upload the todo, push the operator (only when a fingerprint changed), and close the first ready prior
- * month as drafts. Each write is independent + best-effort; a single Drive miss degrades that step, not
- * the whole run. This is the dissolved entrepreneur run, deterministic and LLM-free.
+ * upload the todo, and push the operator (only when a fingerprint changed). It NEVER closes a month:
+ * closing is the operator's explicit call ("stäng <mån>" → the chat finance tool), nudged by
+ * `monthCloseNudge` when a month is ready — a review-hold, so the books are never signed off behind
+ * their back. Each write is independent + best-effort; a single Drive miss degrades that step, not the
+ * whole run. Deterministic and LLM-free.
  */
-export function runDigest(db: Db, deps: DigestDeps & { settings?: LedgerSettings } = {}): ApplyResult {
+export function runDigest(db: Db, deps: DigestDeps = {}): ApplyResult {
   const run = deps.run ?? defaultGwsRunner;
-  const download = deps.download ?? makeDriveDownloader(run);
   const g = gatherDigest(deps);
-  if (!g) return { periods: 0, pushed: false, closed: null, detail: 'no drive root folder id' };
+  if (!g) return { periods: 0, pushed: false, detail: 'no drive root folder id' };
 
   // 1. overdue marks → state.md (only the periods that actually changed).
   for (const p of g.periods) {
@@ -413,16 +410,7 @@ export function runDigest(db: Db, deps: DigestDeps & { settings?: LedgerSettings
     if (target) { insertOutbox(db, { channel: target.channel, conversation_id: target.conversationId, text: push }); pushed = true; }
   }
 
-  // 5. close the FIRST ready prior month (over + reconciled + not closed) — at most one per run.
-  let closed: string | null = null;
-  const ready = g.periods.find((p) => g.thisMonth > p.month && p.exportStatus === 'reconciled' && p.dated.monthCloseSent !== 'yes');
-  if (ready) {
-    const r = runMonthClose(ready.month, { run, download, rootFolderId: () => g.rootId, settings: deps.settings });
-    if (r.closed) closed = ready.month;
-    console.log(`[finance] month-close ${ready.month}: ${r.detail}`);
-  }
-
-  return { periods: g.periods.length, pushed, closed, detail: `${g.periods.length} period(s)${pushed ? ', pushed' : ''}${closed ? `, closed ${closed}` : ''}` };
+  return { periods: g.periods.length, pushed, detail: `${g.periods.length} period(s)${pushed ? ', pushed' : ''}` };
 }
 
 /**

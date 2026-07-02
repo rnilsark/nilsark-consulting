@@ -13,6 +13,7 @@ import {
   type DriveDownloader,
   type GwsRunner,
   type LedgerDocument,
+  type MonthState,
 } from './state.ts';
 
 // The ledger store: the AUTHORITATIVE run-metadata `state.json` on Drive (read/write), plus the shared
@@ -318,6 +319,23 @@ export interface ShadowReport {
  * before letting it own the write path. Any resolution miss is reported as `found:false` (benign),
  * never throws — best-effort by design.
  */
+/** Read + parse a month's `.doppelganger/state.md` into the typed model. null on any miss (no month
+ *  folder / not started / unreadable). Read-only. */
+export function readMonthState(month: string, deps: LedgerStoreDeps = {}): MonthState | null {
+  const run = deps.run ?? defaultGwsRunner;
+  const download = deps.download ?? makeDriveDownloader(run);
+  const rootId = (deps.rootFolderId ?? readDriveRootFolderId)();
+  if (!rootId) return null;
+  const monthId = findChildId(rootId, month, DRIVE_FOLDER_MIME, run);
+  if (!monthId) return null;
+  const doppId = findChildId(monthId, '.doppelganger', DRIVE_FOLDER_MIME, run);
+  if (!doppId) return null;
+  const ref = resolveStateFile(doppId, run);
+  if (!ref) return null;
+  const state = parseStateMd(download(ref.fileId));
+  return state.month === '' ? null : state;
+}
+
 export function shadowValidateMonth(month: string, deps: LedgerStoreDeps = {}): ShadowReport {
   const run = deps.run ?? defaultGwsRunner;
   const download = deps.download ?? makeDriveDownloader(run);

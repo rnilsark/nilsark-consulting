@@ -251,7 +251,6 @@ test('runDigest: persists notify.items + fingerprint to state.json, uploads the 
     financeState: { run, download: () => JSON.stringify({ version: 2, periods: {} }), rootFolderId: () => 'ROOT' },
   });
   assert.equal(r.periods, 1);
-  assert.equal(r.closed, null); // no ready prior month
   assert.ok(stateJson.includes('Fortnox|450|2026-06-25'), 'the unpaid item is persisted to state.json');
   assert.ok(stateJson.includes('"version": 2'));
 });
