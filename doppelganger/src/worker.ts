@@ -13,12 +13,12 @@ import {
   recentChatMessages,
   type Db,
 } from './db.ts';
-import { agentsDir, callableBy, loadRegistry } from './registry.ts';
+import { agentsDir, callableBy, loadRegistry, rootDir } from './registry.ts';
 import { loadAgentContext, loadAgentSettings, loadSoul } from './settings.ts';
 import { downloadAttachment } from './adapters/inbox.ts';
 import { operatorToday } from './adapters/ledger-store.ts';
 import { runIntake } from './adapters/intake.ts';
-import { applyLedgerCorrection, downloadDriveFileToPath, financeLedgerSnapshot, reviewReconcile, runReconcile } from './adapters/reconcile.ts';
+import { applyLedgerCorrection, downloadDriveFileToPath, reviewReconcile, runReconcile } from './adapters/reconcile.ts';
 import { ackPayment, runDigest } from './adapters/digest.ts';
 import { DIGEST_RUN_TASK } from './adapters/ledger-store.ts';
 import type { Order, OutFile, QueueRow, Registry, Reply, RunStatus } from './types.ts';
@@ -47,6 +47,18 @@ function conversationIdFor(row: QueueRow): string | null {
     }
   }
   return null;
+}
+
+/** The finance CLI the chat agent may invoke — granted ONLY in the operator's own thread. */
+const FINANCE_CLI_CMD = `${process.execPath} ${path.join(rootDir, 'src', 'finance-cli.ts')}`;
+
+/** True when this run is the `chat` agent talking in the operator's own DM thread (trusted). */
+function isOperatorChat(row: QueueRow, db?: Db): boolean {
+  if (row.agent !== 'chat' || !db || !config.operatorNumber) return false;
+  const cid = conversationIdFor(row);
+  if (!cid) return false;
+  const target = operatorPushTarget(db, config.operatorNumber);
+  return !!target && target.conversationId === cid;
 }
 
 /** A human-readable wall-clock line in the operator's timezone, so agents don't guess "today". */
@@ -121,17 +133,22 @@ export function buildPrompt(row: QueueRow, outPath: string, registry: Registry, 
     }
   }
 
-  // Ledger context for chat: give the chat LLM a read-only view of the open months' books so it can
-  // EXPLAIN them and reason about a correction. Gated to the operator's own thread (never a family/
-  // untrusted conversation) — the operator's finances are theirs to see; a stranger's chat is not.
-  // Best-effort: a Drive miss just omits it, never blocks the reply. chat still holds no credentials —
-  // this is injected data + delegation, the write goes through the `digest` correct order.
-  if (row.agent === 'chat' && db && conversationId && config.operatorNumber) {
-    const target = operatorPushTarget(db, config.operatorNumber);
-    if (target && target.conversationId === conversationId) {
-      const snapshot = financeLedgerSnapshot();
-      if (snapshot) lines.push(``, `## Ledger (open months — read-only)`, snapshot);
-    }
+  // Finance tools for chat — LIVE, not a frozen snapshot. Granted only in the operator's own thread
+  // (the worker adds the matching --allowedTools grant there too). Chat reads the live ledger with
+  // `state` and acts with the write subcommands, so it verifies against the books instead of trusting
+  // its own chat log. A stranger/family thread never sees this block and never gets the tool grant.
+  if (isOperatorChat(row, db)) {
+    lines.push(
+      ``,
+      `## Finance tools (this thread only — the books are the source of truth, not this chat log)`,
+      `Run these with Bash. ALWAYS read \`state\` for the live truth before you claim anything or act:`,
+      `- \`${FINANCE_CLI_CMD} state [YYYY-MM]\` — the live reconciliation (paid/unpaid, unmatched rows).`,
+      `- \`${FINANCE_CLI_CMD} mark-paid "<supplier>" [--link "<bank text>"]\` — mark an invoice paid.`,
+      `- \`${FINANCE_CLI_CMD} explain "<bank text>" "<reason>"\` — tag an unmatched debit as expected.`,
+      `- \`${FINANCE_CLI_CMD} set-due "<supplier>" <YYYY-MM-DD>\` — fix a due date.`,
+      `- \`${FINANCE_CLI_CMD} close <YYYY-MM>\` — close the month (drafts the handoff). ONLY when the operator explicitly says "stäng".`,
+      `Act on the operator's word, then reply with exactly what changed (quote the tool's output). Never say "redan gjort" from memory — check \`state\`.`,
+    );
   }
 
   // Private context, injected opt-in from $DOPPELGANGER_HOME (never the repo):
@@ -170,10 +187,12 @@ export function runClaude(
   prompt: string,
   registry: Registry,
   runDir: string,
+  extraTools = '',
 ): { cost: number | null; failure: string | null } {
   const agent = registry.agents[row.agent];
   const args = ['-p', prompt, '--output-format', 'json'];
-  if (agent?.tools) args.push('--allowedTools', agent.tools);
+  const tools = [agent?.tools, extraTools].filter(Boolean).join(',');
+  if (tools) args.push('--allowedTools', tools);
   if (agent?.model) args.push('--model', agent.model);
 
   const res = spawnSync(config.claudeBin, args, {
@@ -505,7 +524,8 @@ async function main(): Promise<void> {
     outcome = runFinanceAgent(db, row, outPath); // TS heartbeat rollup (the dissolved entrepreneur run)
   } else {
     acknowledgeChat(db, row); // sign of life BEFORE the slow LLM run; drains ahead of the reply
-    const { cost, failure } = runClaude(row, buildPrompt(row, outPath, registry, db), registry, runDir);
+    const extraTools = isOperatorChat(row, db) ? `Bash(${FINANCE_CLI_CMD}:*)` : '';
+    const { cost, failure } = runClaude(row, buildPrompt(row, outPath, registry, db), registry, runDir, extraTools);
     outcome = readOutcome(outPath, cost, failure);
   }
   routeReplies(db, outcome, conversationIdFor(row)); // a run may only reply to its OWN conversation
